@@ -3,9 +3,13 @@
   "name": "myspehr",
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "src/server.ts",
-  "routes": [
-    { "pattern": "myspehr.live", "custom_domain": true },
-    { "pattern": "www.myspehr.live", "custom_domain": true }
-  ]
+  "main": "src/server.ts"
+  // Custom domain routes (myspehr.live / www.myspehr.live) are deliberately
+  // left out for now: wrangler deploy fails with "Can't infer zone from
+  // route" [code: 10082] until the domain is actually registered and added
+  // as a zone in this Cloudflare account. Add back once that's done:
+  //   "routes": [
+  //     { "pattern": "myspehr.live", "custom_domain": true },
+  //     { "pattern": "www.myspehr.live", "custom_domain": true }
+  //   ]
 }
