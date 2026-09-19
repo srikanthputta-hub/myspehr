@@ -4,6 +4,16 @@
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts"
+  // NOTE (2026-09-19): a git-triggered build/deploy (e.g. clicking "Retry
+  // build" in the Cloudflare dashboard) resets dashboard-only runtime
+  // variables that aren't declared here -- learned this after a retry wiped
+  // all 6 vars set under Settings -> Variables and secrets. Deliberately NOT
+  // fixing this by inlining values into this committed file (even the
+  // publishable/non-secret ones) -- keep re-adding them via the dashboard
+  // after any full rebuild instead. When re-adding, use the "Secret" toggle
+  // for SUPABASE_SERVICE_ROLE_KEY and FHIR_BEARER_TOKEN specifically --
+  // real Cloudflare secrets persist independently of git-triggered deploys,
+  // unlike plain dashboard "Variable" entries, which do not.
   // Custom domain routes (myspehr.live / www.myspehr.live) are deliberately
   // left out for now: wrangler deploy fails with "Can't infer zone from
   // route" [code: 10082] until the domain is actually registered and added
