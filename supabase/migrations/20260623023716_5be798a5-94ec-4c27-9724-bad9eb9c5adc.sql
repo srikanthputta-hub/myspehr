@@ -1,0 +1,13 @@
+DROP TABLE IF EXISTS public.fhir_cache CASCADE;
+DROP TABLE IF EXISTS public.local_allergies CASCADE;
+DROP TABLE IF EXISTS public.local_appointments CASCADE;
+DROP TABLE IF EXISTS public.local_compositions CASCADE;
+DROP TABLE IF EXISTS public.local_conditions CASCADE;
+DROP TABLE IF EXISTS public.local_diagnostic_reports CASCADE;
+DROP TABLE IF EXISTS public.local_encounters CASCADE;
+DROP TABLE IF EXISTS public.local_medication_administrations CASCADE;
+DROP TABLE IF EXISTS public.local_medications CASCADE;
+DROP TABLE IF EXISTS public.local_observations CASCADE;
+DROP TABLE IF EXISTS public.local_patients CASCADE;
+DROP TABLE IF EXISTS public.local_sync_metadata CASCADE;
+DROP FUNCTION IF EXISTS public.touch_local_sync_metadata() CASCADE;

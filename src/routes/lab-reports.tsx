@@ -1,0 +1,164 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { FlaskConical } from "lucide-react";
+import { DetailPageShell, CardShell, sectionColors } from "@/components/spehr-ui";
+import { LiveMeta } from "@/components/live-meta";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { useActiveMrn } from "@/features/_shared/use-active-mrn";
+import {
+  useFhirLabs,
+  conceptText,
+  conceptListText,
+  dedupeObservations,
+  type FhirObservation,
+} from "@/lib/fhir-live";
+
+export const Route = createFileRoute("/lab-reports")({
+  head: () => ({ meta: [{ title: "Lab Reports — My SPEHR Link" }] }),
+  component: LabReportsPage,
+});
+
+function fmt(iso?: string) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+function fmtFull(iso?: string) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: "short",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  });
+}
+
+function LabReportsPage() {
+  const mrn = useActiveMrn();
+  const q = useFhirLabs(mrn);
+  const labs = dedupeObservations(q.data ?? []);
+  const [selected, setSelected] = useState<FhirObservation | null>(null);
+
+  const sorted = [...labs].sort((a, b) => {
+    const ta = new Date(a.effectiveDateTime ?? a.issued ?? 0).getTime();
+    const tb = new Date(b.effectiveDateTime ?? b.issued ?? 0).getTime();
+    return tb - ta;
+  });
+
+  return (
+    <DetailPageShell
+      title="Lab Reports"
+      subtitle="Laboratory results"
+      icon={FlaskConical}
+      color={sectionColors.records}
+    >
+      <LiveMeta updatedAt={q.dataUpdatedAt} onRefresh={q.refresh} isFetching={q.isFetching} />
+      <CardShell icon={FlaskConical} color={sectionColors.records} title="Laboratory Results">
+        {q.isLoading ? (
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-9 w-full" />
+            ))}
+          </div>
+        ) : q.error ? (
+          <p className="text-sm text-destructive">Could not load labs: {q.error.message}</p>
+        ) : sorted.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No lab reports on file yet.</p>
+        ) : (
+          <div className="-mx-5">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent border-white/[0.06]">
+                  <TableHead className="pl-5">Test</TableHead>
+                  <TableHead className="text-right">Value</TableHead>
+                  <TableHead>Unit</TableHead>
+                  <TableHead className="pr-5 text-right">Date/Time</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sorted.map((o) => (
+                  <TableRow
+                    key={o.id}
+                    onClick={() => setSelected(o)}
+                    className="border-white/[0.04] cursor-pointer transition-colors hover:bg-white/[0.03]"
+                  >
+                    <TableCell className="pl-5 font-medium text-foreground">
+                      {conceptText(o.code) || "—"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {o.valueQuantity?.value ?? o.valueString ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {o.valueQuantity?.unit ?? "—"}
+                    </TableCell>
+                    <TableCell className="pr-5 text-right text-xs text-muted-foreground whitespace-nowrap">
+                      {fmt(o.effectiveDateTime ?? o.issued)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardShell>
+
+      <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{conceptText(selected?.code) || "Lab Result"}</DialogTitle>
+            <DialogDescription>Full result context</DialogDescription>
+          </DialogHeader>
+          {selected && (
+            <dl className="space-y-3 text-sm">
+              <Row label="Value">
+                <span className="tabular-nums font-medium">
+                  {selected.valueQuantity?.value ?? selected.valueString ?? "—"}
+                  {selected.valueQuantity?.unit ? ` ${selected.valueQuantity.unit}` : ""}
+                </span>
+              </Row>
+              <Row label="Unit">{selected.valueQuantity?.unit ?? "—"}</Row>
+              <Row label="Category">{conceptListText(selected.category) || "—"}</Row>
+              <Row label="Timestamp">{fmtFull(selected.effectiveDateTime ?? selected.issued)}</Row>
+              {selected.interpretation && (
+                <Row label="Interpretation">{conceptListText(selected.interpretation) || "—"}</Row>
+              )}
+            </dl>
+          )}
+        </DialogContent>
+      </Dialog>
+    </DetailPageShell>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex justify-between gap-4 border-b border-white/[0.05] pb-2 last:border-0">
+      <dt className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0">{label}</dt>
+      <dd className="text-right text-foreground min-w-0">{children}</dd>
+    </div>
+  );
+}
