@@ -5,8 +5,7 @@ import { Loader2 } from "lucide-react";
 import { patientStore, type FhirPatient } from "@/lib/patient-store";
 import { MRN_SYSTEM } from "@/lib/mrn";
 import { useFhirSync } from "@/lib/use-fhir-sync";
-
-const LOGO_URL = "/__l5e/assets-v1/bcb18570-fd57-45db-a6ef-4d55ff712372/logo.png";
+import logoUrl from "@/assets/spehr-logo.png";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -72,7 +71,7 @@ function LoginPage() {
         >
           <div className="flex justify-center py-6">
             <img
-              src={LOGO_URL}
+              src={logoUrl}
               alt="S Group Private Network"
               className="h-40 w-auto drop-shadow-xl"
             />
