@@ -2,9 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveAppointmentProvidersFromDischarge } from "@/lib/fhir-provider-resolution.functions";
-import { useFhirAppointments, conceptListText, type FhirAppointment } from "@/lib/fhir-live";
+import { useFhirAppointments, conceptListText, isRecallAppointment, type FhirAppointment } from "@/lib/fhir-live";
 import { useActiveMrn } from "../_shared/use-active-mrn";
 import type { AppointmentRow } from "./types";
+
+/** AppointmentRow plus a client-side-only flag (never persisted) marking a
+ * spehr-originated post-discharge recall Appointment, so the UI can show a
+ * "Hospital recall" chip. */
+export type AppointmentRowWithMeta = AppointmentRow & { isRecall?: boolean };
 
 /**
  * Subscribes to the active patient's scheduled and proposed appointments.
@@ -12,7 +17,7 @@ import type { AppointmentRow } from "./types";
  * SPEHR-originated bookings (or fresh MySPEHR PUTs) show up regardless of
  * which side wrote them.
  */
-function fhirToRow(a: FhirAppointment): AppointmentRow {
+function fhirToRow(a: FhirAppointment): AppointmentRowWithMeta {
   const start = a.start ?? new Date().toISOString();
   const providerParticipant = (a.participant ?? []).find(
     (p) => p.actor?.reference?.startsWith("Practitioner/") || p.actor?.display,
@@ -37,14 +42,15 @@ function fhirToRow(a: FhirAppointment): AppointmentRow {
     fhir_id: a.id,
     created_at: null as unknown as string,
     updated_at: null as unknown as string,
-  } as AppointmentRow;
+    isRecall: isRecallAppointment(a),
+  } as AppointmentRowWithMeta;
 }
 
 export function useAppointments() {
   const mrn = useActiveMrn();
   const resolveProviders = useServerFn(resolveAppointmentProvidersFromDischarge);
   const attemptedProviderResolution = useRef<Set<string>>(new Set());
-  const [rows, setRows] = useState<AppointmentRow[]>([]);
+  const [rows, setRows] = useState<AppointmentRowWithMeta[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fhirQ = useFhirAppointments(mrn);
@@ -99,7 +105,7 @@ export function useAppointments() {
   }, [mrn, load]);
 
   const appointments = useMemo(() => {
-    const byKey = new Map<string, AppointmentRow>();
+    const byKey = new Map<string, AppointmentRowWithMeta>();
     for (const r of rows) {
       const k = r.fhir_id ?? r.id;
       byKey.set(k, r);

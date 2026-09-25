@@ -36,12 +36,43 @@ function allText(comp: FhirComposition): string {
   return chunks.join("\n");
 }
 
+/** Recursively find the "Follow-Up ..." section (e.g. spehr's "Follow-Up Care"). */
+function findFollowUpSection(
+  sections: FhirCompositionSection[] | undefined,
+): FhirCompositionSection | undefined {
+  for (const s of sections ?? []) {
+    if (s.title && /follow[-\s]?up/i.test(s.title)) return s;
+    const nested = findFollowUpSection(s.section);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+/** True when the Follow-Up section already links a real Appointment resource
+ * (Phase D's `narrativeSection(..., [{reference: urn(apptId)}])`) — a real
+ * appointment already covers this, so the client-derived card should not
+ * also render. */
+function followUpSectionHasAppointmentEntry(section: FhirCompositionSection | undefined): boolean {
+  return (section?.entry ?? []).some((e) => (e.reference ?? "").includes("Appointment/") || (e.reference ?? "").startsWith("urn:uuid:"));
+}
+
+// Fixed: the previous pattern `[^.\n,]+?` stopped at the first period, so a
+// name like "Dr. Alan Reyes, MD" only ever matched up to "Dr" before hitting
+// the period in "Dr.". This version tolerates a leading "Dr." and a trailing
+// credential suffix, and stops on comma/newline (not period) so "Dr. Alan
+// Reyes" parses as the provider name.
 const FOLLOWUP_RE =
-  /follow[-\s]?up\s+with\s+([^.\n,]+?)(?:\s+within\s+(\d+)\s*(day|days|week|weeks))?[.\n,]/i;
+  /follow[-\s]?up\s+with\s+((?:dr\.?\s+)?[^\n,]+?)(?:,\s*(?:md|do|np|pa))?\s+within\s+(\d+)\s*(day|days|week|weeks)/i;
 
 export function parseFollowUp(comp: FhirComposition | undefined): DerivedFollowUp | null {
   if (!comp) return null;
-  const text = allText(comp);
+
+  const followUpSection = findFollowUpSection(comp.section);
+  // A real recall Appointment already exists for this discharge — don't show
+  // the client-derived suggestion card on top of it.
+  if (followUpSectionHasAppointmentEntry(followUpSection)) return null;
+
+  const text = followUpSection ? collectText(followUpSection) : allText(comp);
   if (!text) return null;
   const m = FOLLOWUP_RE.exec(text);
   if (!m) return null;
