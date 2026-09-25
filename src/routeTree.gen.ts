@@ -26,6 +26,7 @@ import { Route as RecordsRouteImport } from './routes/records'
 import { Route as ApiFhirProxyRouteImport } from './routes/api/fhir-proxy'
 import { Route as BillingInvoiceIdRouteImport } from './routes/billing.$invoiceId'
 import { Route as MessagesProviderIdRouteImport } from './routes/messages.$providerId'
+import { Route as ApiCronInboundSyncRouteImport } from './routes/api/cron/inbound-sync'
 import { Route as ApiFhirSplatRouteImport } from './routes/api/fhir/$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -113,6 +114,11 @@ const MessagesProviderIdRoute = MessagesProviderIdRouteImport.update({
   path: '/$providerId',
   getParentRoute: () => MessagesRoute,
 } as any)
+const ApiCronInboundSyncRoute = ApiCronInboundSyncRouteImport.update({
+  id: '/api/cron/inbound-sync',
+  path: '/api/cron/inbound-sync',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiFhirSplatRoute = ApiFhirSplatRouteImport.update({
   id: '/api/fhir/$',
   path: '/api/fhir/$',
@@ -137,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/api/fhir-proxy': typeof ApiFhirProxyRoute
   '/billing/$invoiceId': typeof BillingInvoiceIdRoute
   '/messages/$providerId': typeof MessagesProviderIdRoute
+  '/api/cron/inbound-sync': typeof ApiCronInboundSyncRoute
   '/api/fhir/$': typeof ApiFhirSplatRoute
 }
 export interface FileRoutesByTo {
@@ -157,6 +164,7 @@ export interface FileRoutesByTo {
   '/api/fhir-proxy': typeof ApiFhirProxyRoute
   '/billing/$invoiceId': typeof BillingInvoiceIdRoute
   '/messages/$providerId': typeof MessagesProviderIdRoute
+  '/api/cron/inbound-sync': typeof ApiCronInboundSyncRoute
   '/api/fhir/$': typeof ApiFhirSplatRoute
 }
 export interface FileRoutesById {
@@ -178,6 +186,7 @@ export interface FileRoutesById {
   '/api/fhir-proxy': typeof ApiFhirProxyRoute
   '/billing/$invoiceId': typeof BillingInvoiceIdRoute
   '/messages/$providerId': typeof MessagesProviderIdRoute
+  '/api/cron/inbound-sync': typeof ApiCronInboundSyncRoute
   '/api/fhir/$': typeof ApiFhirSplatRoute
 }
 export interface FileRouteTypes {
@@ -200,6 +209,7 @@ export interface FileRouteTypes {
     | '/api/fhir-proxy'
     | '/billing/$invoiceId'
     | '/messages/$providerId'
+    | '/api/cron/inbound-sync'
     | '/api/fhir/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -220,6 +230,7 @@ export interface FileRouteTypes {
     | '/api/fhir-proxy'
     | '/billing/$invoiceId'
     | '/messages/$providerId'
+    | '/api/cron/inbound-sync'
     | '/api/fhir/$'
   id:
     | '__root__'
@@ -240,6 +251,7 @@ export interface FileRouteTypes {
     | '/api/fhir-proxy'
     | '/billing/$invoiceId'
     | '/messages/$providerId'
+    | '/api/cron/inbound-sync'
     | '/api/fhir/$'
   fileRoutesById: FileRoutesById
 }
@@ -259,6 +271,7 @@ export interface RootRouteChildren {
   ProfileRoute: typeof ProfileRoute
   RecordsRoute: typeof RecordsRoute
   ApiFhirProxyRoute: typeof ApiFhirProxyRoute
+  ApiCronInboundSyncRoute: typeof ApiCronInboundSyncRoute
   ApiFhirSplatRoute: typeof ApiFhirSplatRoute
 }
 
@@ -383,6 +396,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MessagesProviderIdRouteImport
       parentRoute: typeof MessagesRoute
     }
+    '/api/cron/inbound-sync': {
+      id: '/api/cron/inbound-sync'
+      path: '/api/cron/inbound-sync'
+      fullPath: '/api/cron/inbound-sync'
+      preLoaderRoute: typeof ApiCronInboundSyncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/fhir/$': {
       id: '/api/fhir/$'
       path: '/api/fhir/$'
@@ -432,6 +452,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProfileRoute: ProfileRoute,
   RecordsRoute: RecordsRoute,
   ApiFhirProxyRoute: ApiFhirProxyRoute,
+  ApiCronInboundSyncRoute: ApiCronInboundSyncRoute,
   ApiFhirSplatRoute: ApiFhirSplatRoute,
 }
 export const routeTree = rootRouteImport
