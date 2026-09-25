@@ -17,7 +17,7 @@ import { useFhirPatient, fhirName } from "@/lib/fhir-live";
 import { useFhirSync } from "@/lib/use-fhir-sync";
 import { patientStore } from "@/lib/patient-store";
 import { Skeleton } from "@/components/ui/skeleton";
-import logoAsset from "@/assets/logo.png.asset.json";
+import logoUrl from "@/assets/spehr-logo.png";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — My SPEHR Link" }] }),
@@ -88,7 +88,7 @@ function DashboardPage() {
             </div>
           </div>
           <img
-            src={logoAsset.url}
+            src={logoUrl}
             alt="Hospital logo"
             className="shrink-0 h-24 w-24 object-contain"
           />
