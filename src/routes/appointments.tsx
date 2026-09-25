@@ -374,6 +374,11 @@ function AppointmentsPage() {
                   <h3 className="flex-1 min-w-0 truncate text-[12.5px] font-semibold text-foreground">
                     {title}
                   </h3>
+                  {a.isRecall && (
+                    <span className="inline-flex items-center rounded-full px-2 py-[3px] text-[10px] font-bold uppercase tracking-wider ring-1 ring-sky-400/40 bg-sky-400/10 text-sky-300">
+                      Hospital recall
+                    </span>
+                  )}
                   <StatusPill status={a.status} />
                 </div>
 

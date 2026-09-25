@@ -151,6 +151,7 @@ export interface FhirAppointment {
   id: string;
   status?: string;
   description?: string;
+  appointmentType?: FhirCodeableConcept;
   serviceType?: FhirCodeableConcept[];
   start?: string;
   end?: string;
@@ -161,6 +162,17 @@ export interface FhirAppointment {
   }>;
   location?: Array<{ display?: string }>;
   meta?: FhirMeta;
+}
+
+/** True for a spehr-originated post-discharge recall Appointment (Phase D):
+ * appointmentType coded v2-0276 FOLLOWUP, or the `urn:spehr:appointment-origin`
+ * tag set to `recall`. */
+export function isRecallAppointment(a: FhirAppointment): boolean {
+  const typeCode = a.appointmentType?.coding?.some((c) => c.code === "FOLLOWUP");
+  const originTag = (a.meta?.tag ?? []).some(
+    (t) => t.system === "urn:spehr:appointment-origin" && t.code === "recall",
+  );
+  return !!typeCode || originTag;
 }
 
 export interface FhirExtension {
