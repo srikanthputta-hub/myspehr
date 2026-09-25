@@ -16,15 +16,21 @@ export const syncMrn = createServerFn({ method: "POST" })
       .object({ mrn: z.string().min(1).max(64), purge: z.boolean().optional() })
       .parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data }) => performMrnSync(data.mrn.trim(), !!data.purge));
+
+/**
+ * Core sync logic, factored out of the `syncMrn` server function so the
+ * cron-driven inbound poller (`/api/cron/inbound-sync`) can call the exact
+ * same code path instead of a second, divergent implementation. `syncMrn`
+ * itself remains the client-facing entrypoint (login, dashboard mount).
+ */
+export async function performMrnSync(mrn: string, purge: boolean) {
     const { fhirJson } = await import("@/lib/fhir-client.server");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const mrn = data.mrn.trim();
-
     // Optional purge — wipes all rows for this MRN before re-fetch so a fresh
     // login starts from a clean slate (no duplicated/stale data).
-    if (data.purge) {
+    if (purge) {
       const tables = [
         "observations",
         "medications",
@@ -382,8 +388,7 @@ export const syncMrn = createServerFn({ method: "POST" })
         careTeam: careTeamRows.length,
       },
     };
-
-  });
+}
 
 /* -------- Types & mappers (server-only — no client import overhead) -------- */
 
