@@ -10,10 +10,30 @@
   // all 6 vars set under Settings -> Variables and secrets. Deliberately NOT
   // fixing this by inlining values into this committed file (even the
   // publishable/non-secret ones) -- keep re-adding them via the dashboard
-  // after any full rebuild instead. When re-adding, use the "Secret" toggle
-  // for SUPABASE_SERVICE_ROLE_KEY and FHIR_BEARER_TOKEN specifically --
-  // real Cloudflare secrets persist independently of git-triggered deploys,
-  // unlike plain dashboard "Variable" entries, which do not.
+  // after any full rebuild instead.
+  //
+  // UPDATE (2026-10-26): this bit us a second time, specifically for
+  // FHIR_BASE_URL and FHIR_BEARER_TOKEN -- the backend lost FHIR connectivity
+  // again because both were re-added as plain dashboard "Variable" entries
+  // instead of "Secret" entries. To be unambiguous going forward:
+  //
+  //   FHIR_BASE_URL, FHIR_BEARER_TOKEN, and SUPABASE_SERVICE_ROLE_KEY MUST
+  //   be set as Cloudflare SECRETS, never as plain Variables. In the
+  //   dashboard: Settings -> Variables and secrets -> flip the "Secret"
+  //   toggle on when adding/editing each one. Plain "Variable" entries are
+  //   wiped by any git-triggered rebuild or a manual "Retry build" click;
+  //   Secrets persist across both. If FHIR calls start failing again after a
+  //   rebuild, this is the first thing to check.
+  //
+  //   FHIR_BASE_URL looks like it's "just a hostname" and therefore safe to
+  //   hardcode here, but it isn't: its value is
+  //   https://fhir.medblocks.com/fhir/<opaque-per-tenant-token>, and that
+  //   trailing path segment functions as an access token -- Medblocks FHIR
+  //   server URLs encode the per-tenant credential directly in the URL path,
+  //   not as a separate header or query param. Treat the whole URL as a
+  //   secret, not a convenience value, and do NOT commit it into this file
+  //   even in a future "cleanup." Same reasoning applies to FHIR_BEARER_TOKEN
+  //   (an explicit bearer token, obviously a secret).
   // Custom domain routes (myspehr.live / www.myspehr.live) are deliberately
   // left out for now: wrangler deploy fails with "Can't infer zone from
   // route" [code: 10082] until the domain is actually registered and added
