@@ -4,6 +4,7 @@ import { ArrowLeft, Send, UserRound } from "lucide-react";
 import { sectionColors } from "@/components/spehr-ui";
 import { useProviders } from "@/features/providers";
 import { useActiveMrn } from "@/features/_shared/use-active-mrn";
+import { CHAT_STORAGE_PREFIX } from "@/lib/chat-storage";
 
 export const Route = createFileRoute("/messages/$providerId")({
   head: () => ({ meta: [{ title: "Chat — My SPEHR Link" }] }),
@@ -17,12 +18,10 @@ interface ChatMsg {
   at: string;
 }
 
-const STORAGE_PREFIX = "spehr-chat:";
-
 function loadChat(key: string): ChatMsg[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(STORAGE_PREFIX + key);
+    const raw = window.localStorage.getItem(CHAT_STORAGE_PREFIX + key);
     return raw ? (JSON.parse(raw) as ChatMsg[]) : [];
   } catch {
     return [];
@@ -32,7 +31,7 @@ function loadChat(key: string): ChatMsg[] {
 function saveChat(key: string, msgs: ChatMsg[]) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(msgs));
+    window.localStorage.setItem(CHAT_STORAGE_PREFIX + key, JSON.stringify(msgs));
   } catch {
     /* ignore */
   }

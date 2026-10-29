@@ -27,6 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { DetailPageShell, CardShell, sectionColors } from "@/components/spehr-ui";
 import { patientStore } from "@/lib/patient-store";
+import { clearAllChatHistory } from "@/lib/chat-storage";
 import { useActiveMrn } from "@/features/_shared/use-active-mrn";
 import { useFhirConditions, conceptText } from "@/lib/fhir-live";
 
@@ -100,6 +101,9 @@ function MorePage() {
 
   const handleLogout = () => {
     patientStore.set(null);
+    // Prevent a prior patient's typed chat drafts from lingering in
+    // localStorage on a shared/public device after sign-out.
+    clearAllChatHistory();
     navigate({ to: "/login" });
   };
 
@@ -215,7 +219,10 @@ function MorePage() {
         <ToggleRow label="Biometric sign-in" checked={biometric} onChange={setBiometric} />
         <ToggleRow label="Share anonymous analytics" checked={analytics} onChange={setAnalytics} />
         <p className="text-xs text-muted-foreground pt-2">
-          Your health records are encrypted in transit and at rest. Read our privacy policy in About.
+          Connections to this app are encrypted in transit (HTTPS). This is a demo
+          application and does not yet enforce per-patient access controls on stored
+          records — avoid entering real personal health information. Read our privacy
+          policy in About.
         </p>
       </SimpleDialog>
 

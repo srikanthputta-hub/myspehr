@@ -4,6 +4,7 @@ import { DetailPageShell, CardShell, sectionColors } from "@/components/spehr-ui
 import { LiveMeta } from "@/components/live-meta";
 import { Skeleton } from "@/components/ui/skeleton";
 import { patientStore } from "@/lib/patient-store";
+import { clearAllChatHistory } from "@/lib/chat-storage";
 import { useActiveMrn } from "@/features/_shared/use-active-mrn";
 import { useFhirPatient, fhirName, type FhirPatient } from "@/lib/fhir-live";
 
@@ -32,6 +33,9 @@ function ProfilePage() {
 
   const onSignOut = () => {
     patientStore.set(null);
+    // Prevent a prior patient's typed chat drafts from lingering in
+    // localStorage on a shared/public device after sign-out.
+    clearAllChatHistory();
     navigate({ to: "/login" });
   };
 

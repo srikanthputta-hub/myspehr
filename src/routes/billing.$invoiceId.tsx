@@ -1,10 +1,30 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Printer, Receipt } from "lucide-react";
+import { ArrowLeft, Printer, Receipt, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useActiveMrn } from "@/features/_shared/use-active-mrn";
 import { fhirProxy } from "@/lib/fhir-proxy-client";
 import { useFhirPatient, fhirName, type FhirChargeItem, type FhirInvoiceFull, type FhirBundle, type FhirExtension } from "@/lib/fhir-live";
+
+/**
+ * NOTE on this file's ownership check:
+ *
+ * The /api/fhir-proxy route performs NO per-patient authorization — it
+ * will happily return any patient's Invoice to anyone who asks. The check
+ * below (`isForeignInvoice`) is a client-side, UI-layer mitigation only:
+ * it stops THIS app's UI from rendering another patient's invoice to the
+ * current session, but it does nothing to stop a direct call to the
+ * proxy API itself. The real fix is server-side per-patient authorization
+ * on the FHIR proxy (tracked separately — it requires real patient
+ * authentication, which is out of scope here).
+ */
+
+/** Pulls the id out of a FHIR "Patient/{id}" reference. */
+function patientIdFromReference(ref?: string): string | null {
+  if (!ref) return null;
+  const m = /^Patient\/(.+)$/.exec(ref);
+  return m ? m[1] : null;
+}
 
 export const Route = createFileRoute("/billing/$invoiceId")({
   head: () => ({ meta: [{ title: "Invoice — My SPEHR Link" }] }),
@@ -89,6 +109,13 @@ function InvoiceDetailPage() {
   const invoice = invoiceQ.data;
   const charges = chargesQ.data ?? [];
   const patient = patientQ.data ?? null;
+
+  // Defense-in-depth ownership check (see note above): the invoice's FHIR
+  // `subject` should reference the active session's patient. If it
+  // references someone else, refuse to render their financial data.
+  const subjectPatientId = patientIdFromReference(invoice?.subject?.reference);
+  const isForeignInvoice = !!invoice && !!mrn && !!subjectPatientId && subjectPatientId !== mrn;
+
   const facility =
     invoice?.issuer?.display ||
     charges[0]?.performer?.[0]?.actor?.display ||
@@ -97,6 +124,16 @@ function InvoiceDetailPage() {
   const totalGross = invoice?.totalGross;
   const totalNet = invoice?.totalNet;
   const currency = totalGross?.currency ?? totalNet?.currency ?? charges[0]?.priceOverride?.currency ?? "USD";
+
+  // "Bill to" should reflect the invoice's actual subject, never just
+  // assume it's the current session's own patient (that was the bug:
+  // this header used to always render the session's identity regardless
+  // of whose invoice was actually loaded).
+  const billToName =
+    invoice?.subject?.display ||
+    (subjectPatientId && subjectPatientId === mrn ? fhirName(patient).full : "") ||
+    "Patient";
+  const billToMrn = subjectPatientId ?? mrn ?? "—";
 
   return (
     <main className="pb-10 min-h-screen bg-background">
@@ -107,11 +144,27 @@ function InvoiceDetailPage() {
         >
           <ArrowLeft className="w-3.5 h-3.5" /> Back to billing
         </Link>
-        <Button size="sm" variant="outline" className="gap-2" onClick={() => window.print()}>
-          <Printer className="w-4 h-4" /> Print to PDF
-        </Button>
+        {!isForeignInvoice && (
+          <Button size="sm" variant="outline" className="gap-2" onClick={() => window.print()}>
+            <Printer className="w-4 h-4" /> Print to PDF
+          </Button>
+        )}
       </div>
 
+      {isForeignInvoice ? (
+        <section className="mx-4 mt-4 rounded-2xl border border-destructive/30 bg-destructive/5 p-6">
+          <div className="flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+            <div>
+              <h1 className="text-sm font-semibold text-destructive">This invoice isn't available</h1>
+              <p className="mt-1.5 text-xs text-muted-foreground max-w-md">
+                This invoice doesn't belong to the patient currently signed in, so it can't be
+                shown here. If you believe this is a billing error, contact support.
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : (
       <section className="print-invoice mx-4 mt-4 rounded-2xl border border-white/[0.06] bg-card p-6 print:m-0 print:rounded-none print:border-0 print:bg-white print:text-black">
         {/* Header */}
         <header className="flex items-start justify-between gap-4 border-b border-white/[0.06] pb-4 print:border-black/20">
@@ -136,9 +189,9 @@ function InvoiceDetailPage() {
         <div className="grid grid-cols-2 gap-4 py-4 text-xs border-b border-white/[0.06] print:border-black/20">
           <div>
             <p className="uppercase tracking-wider text-muted-foreground print:text-black/60">Bill to</p>
-            <p className="mt-1 font-medium text-sm">{fhirName(patient).full || "Patient"}</p>
+            <p className="mt-1 font-medium text-sm">{billToName}</p>
             <p className="text-[11px] text-muted-foreground print:text-black/70 font-mono">
-              MRN {mrn ?? "—"}
+              MRN {billToMrn}
             </p>
           </div>
           <div className="text-right">
@@ -214,6 +267,7 @@ function InvoiceDetailPage() {
           </dl>
         </footer>
       </section>
+      )}
 
       <style>{`
         @media print {
