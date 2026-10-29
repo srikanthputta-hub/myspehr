@@ -22,21 +22,31 @@ export function LiveMeta({
     return () => window.clearInterval(t);
   }, []);
   const label = updatedAt ? formatAgo(now - updatedAt) : "just now";
+  const asOf = updatedAt
+    ? new Date(updatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : null;
   return (
-    <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.14em] text-muted-foreground mb-3 px-1">
-      <span className="flex items-center gap-2">
-        <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400/90" />
-        Live · updated {label}
-      </span>
-      <button
-        type="button"
-        onClick={() => void onRefresh()}
-        disabled={isFetching}
-        className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground disabled:opacity-60 transition-colors"
-      >
-        <RefreshCw className={cn("w-3 h-3", isFetching && "animate-spin")} />
-        Refresh
-      </button>
+    <div className="mb-3 px-1">
+      <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+        <span className="flex items-center gap-2">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400/90" />
+          Live · updated {label}
+        </span>
+        <button
+          type="button"
+          onClick={() => void onRefresh()}
+          disabled={isFetching}
+          className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground disabled:opacity-60 transition-colors"
+        >
+          <RefreshCw className={cn("w-3 h-3", isFetching && "animate-spin")} />
+          Refresh
+        </button>
+      </div>
+      {asOf && (
+        <p className="mt-1 text-[10.5px] normal-case tracking-normal text-muted-foreground/70">
+          As of {asOf} — new chart entries can take a minute or two to show up here.
+        </p>
+      )}
     </div>
   );
 }
