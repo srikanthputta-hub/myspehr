@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Receipt, Loader2, Check, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
@@ -65,6 +65,13 @@ function BillingPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [payingId, setPayingId] = useState<string | null>(null);
+  // Synchronous (ref-based) guard against double-submission: React state
+  // updates from onMutate/setPayingId are not visible until the next
+  // render, so a rapid double-click (or a retry fired before that render)
+  // could otherwise call mutate() twice for the same invoice before the
+  // button has a chance to visually disable. This ref blocks that
+  // immediately, in the same synchronous click handler.
+  const submittingInvoiceIdsRef = useRef<Set<string>>(new Set());
 
   const invoicesQuery = useQuery({
     queryKey: ["fhir", "invoices", mrn],
@@ -93,6 +100,19 @@ function BillingPage() {
 
   const payMutation = useMutation({
     mutationFn: async (inv: FhirInvoice) => {
+      // Idempotency guard: a PaymentNotice may already exist for this
+      // invoice (an earlier click that the UI missed, a retried request,
+      // etc). Check before creating another one rather than blindly
+      // PUTting a brand-new PaymentNotice every time.
+      const existing = await fhirProxy<FhirBundle<{ id: string }>>({
+        method: "GET",
+        path: "/PaymentNotice",
+        query: { request: `Invoice/${inv.id}`, _count: 1 },
+      });
+      if (existing.ok && (existing.data?.entry?.length ?? 0) > 0) {
+        return { alreadyExisted: true as const };
+      }
+
       const { value, currency } = invoiceAmount(inv);
       const id = myspehrPaymentId();
       const resource = withMyspehrTag({
@@ -111,13 +131,19 @@ function BillingPage() {
         body: resource,
       });
       if (!res.ok) throw new Error(`FHIR ${res.status}: ${res.raw.slice(0, 200)}`);
-      return id;
+      return { id, alreadyExisted: false as const };
     },
     onMutate: (inv) => setPayingId(inv.id),
-    onSuccess: () => {
-      toast.success("Payment submitted", {
-        description: "It will show as settled on your billing summary shortly.",
-      });
+    onSuccess: (result) => {
+      if (result.alreadyExisted) {
+        toast.info("Already submitted", {
+          description: "A payment for this invoice was already recorded.",
+        });
+      } else {
+        toast.success("Payment submitted", {
+          description: "It will show as settled on your billing summary shortly.",
+        });
+      }
       void queryClient.invalidateQueries({ queryKey: ["fhir", "invoices", mrn] });
     },
     onError: (err) => {
@@ -125,7 +151,10 @@ function BillingPage() {
         description: err instanceof Error ? err.message : undefined,
       });
     },
-    onSettled: () => setPayingId(null),
+    onSettled: (_data, _err, inv) => {
+      setPayingId(null);
+      submittingInvoiceIdsRef.current.delete(inv.id);
+    },
   });
 
   return (
@@ -193,9 +222,16 @@ function BillingPage() {
                       <Button
                         size="sm"
                         className="gap-2"
-                        disabled={isPaying}
+                        disabled={isPaying || submittingInvoiceIdsRef.current.has(inv.id)}
                         onClick={(e) => {
                           e.stopPropagation();
+                          // Guard against a rapid double-click submitting two
+                          // PaymentNotice PUTs before React re-renders the
+                          // disabled state.
+                          if (submittingInvoiceIdsRef.current.has(inv.id)) {
+                            return;
+                          }
+                          submittingInvoiceIdsRef.current.add(inv.id);
                           payMutation.mutate(inv);
                         }}
                       >
