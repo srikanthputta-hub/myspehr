@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { CalendarDays, Plus, Stethoscope, MapPin, Check, Loader2, FileText } from "lucide-react";
+import { CalendarDays, Plus, Stethoscope, MapPin, Check, X, Loader2, FileText } from "lucide-react";
 import { DetailPageShell, sectionColors } from "@/components/spehr-ui";
-import { useAppointments, createAppointment } from "@/features/appointments";
+import { useAppointments, createAppointment, updateAppointment } from "@/features/appointments";
 import { useDerivedFollowUp } from "@/features/appointments/derive-followup";
 import { useSpehrDirectory } from "@/features/appointments/use-spehr-directory";
 import { useDemographics } from "@/features/demographics";
@@ -117,12 +117,26 @@ function fmtTime(iso: string) {
   });
 }
 
+/* Statuses spehr's Scheduling tab treats as closed (see admissions-board.tsx
+ * CLOSED_APPT_STATUSES) — mirrored here so a patient can't "cancel" an
+ * appointment that's already finished or already cancelled. */
+const CLOSED_STATUSES = new Set(["fulfilled", "completed", "cancelled", "noshow"]);
+
+/** True only for a row that actually originated as a local myspehr booking
+ * (has a real `created_at`, unlike a purely FHIR-derived row produced by
+ * `fhirToRow`, which sets it to null) — only those can be mirrored back to
+ * the local `appointments` table after a cancel. */
+function isLocalRow(a: { created_at: string | null }): boolean {
+  return !!a.created_at;
+}
+
 function AppointmentsPage() {
   const { mrn, appointments, loading, refresh } = useAppointments();
   const { followUp } = useDerivedFollowUp(mrn);
   const { patient } = useDemographics();
   const directory = useSpehrDirectory();
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [cancelingId, setCancelingId] = useState<string | null>(null);
 
   const patientFullName = useMemo(() => {
     const parts = [patient?.first_name, patient?.last_name].filter(Boolean) as string[];
@@ -183,6 +197,78 @@ function AppointmentsPage() {
       });
     } finally {
       setConfirmingId(null);
+    }
+  };
+
+  /**
+   * Cancel a myspehr-booked appointment. Same gate as everywhere else that
+   * writes to FHIR in this file: PUT the FHIR Appointment to a terminal
+   * `status: "cancelled"` first (so spehr's Scheduling tab — and its
+   * auto-accept/auto-admit automation, which only ever acts on non-terminal
+   * statuses — reflects the cancellation), and mirror that status into the
+   * local `appointments` row only once the FHIR write actually succeeds.
+   * Never a local-only delete: that would desync from the FHIR record spehr
+   * still has, and the merge in useAppointments() would just resurrect the
+   * appointment from the live FHIR read on the next refresh anyway.
+   */
+  const cancelAppointment = async (a: (typeof appointments)[number]) => {
+    if (!a.fhir_id) {
+      toast.error("Cannot cancel", { description: "Missing FHIR record id." });
+      return;
+    }
+    setCancelingId(a.id);
+    try {
+      const startIso = new Date(a.scheduled_for).toISOString();
+      const endIso = new Date(new Date(a.scheduled_for).getTime() + 30 * 60_000).toISOString();
+      const facilityDisplay = a.location?.trim() ?? "";
+      const resource = withMyspehrTag({
+        resourceType: "Appointment",
+        id: a.fhir_id,
+        status: "cancelled",
+        description: a.reason ?? a.description ?? "Cancelled by patient",
+        serviceType: [{ text: a.appointment_type ?? a.reason ?? "Follow-up" }],
+        start: startIso,
+        end: endIso,
+        comment: a.notes ?? undefined,
+        participant: [
+          {
+            actor: { reference: `Patient/${mrn}`, type: "Patient", display: patientFullName || mrn || "" },
+            required: "required",
+            status: "accepted",
+          },
+          ...(a.provider
+            ? [{ actor: { type: "Practitioner", display: a.provider }, required: "required", status: "accepted" }]
+            : []),
+          ...(facilityDisplay
+            ? [
+                {
+                  actor: { type: "Location", display: facilityDisplay },
+                  required: "required",
+                  status: "accepted",
+                },
+              ]
+            : []),
+        ],
+        ...(facilityDisplay ? { location: [{ display: facilityDisplay }] } : {}),
+      });
+      const res = await fhirProxy({
+        method: "PUT",
+        path: `/Appointment/${a.fhir_id}`,
+        body: resource,
+      });
+      if (!res.ok) throw new Error(`FHIR ${res.status}: ${res.raw.slice(0, 200)}`);
+
+      if (isLocalRow(a)) {
+        await updateAppointment(a.id, { status: "cancelled" });
+      }
+      toast.success("Appointment cancelled");
+      await refresh();
+    } catch (e) {
+      toast.error("Could not cancel", {
+        description: e instanceof Error ? e.message : undefined,
+      });
+    } finally {
+      setCancelingId(null);
     }
   };
 
@@ -402,22 +488,41 @@ function AppointmentsPage() {
                   {a.notes && (
                     <p className="text-[11px] text-muted-foreground pt-1">{a.notes}</p>
                   )}
-                  {(a.status?.toLowerCase() === "proposed") && (
-                    <div className="pt-2">
+                  {!CLOSED_STATUSES.has(a.status?.toLowerCase() ?? "") && a.fhir_id && (
+                    <div className="pt-2 flex items-center gap-2">
+                      {a.status?.toLowerCase() === "proposed" && (
+                        <Button
+                          size="sm"
+                          className="gap-1.5 border-0 text-white hover:brightness-110"
+                          style={{ backgroundColor: TEAL }}
+                          disabled={confirmingId === a.id || cancelingId === a.id}
+                          onClick={() => void confirmAppointment(a)}
+                        >
+                          {confirmingId === a.id ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Confirming…
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3.5 h-3.5" /> Confirm appointment
+                            </>
+                          )}
+                        </Button>
+                      )}
                       <Button
                         size="sm"
-                        className="gap-1.5 border-0 text-white hover:brightness-110"
-                        style={{ backgroundColor: TEAL }}
-                        disabled={confirmingId === a.id}
-                        onClick={() => void confirmAppointment(a)}
+                        variant="ghost"
+                        className="gap-1.5 text-rose-300 hover:text-rose-200 hover:bg-rose-400/10"
+                        disabled={confirmingId === a.id || cancelingId === a.id}
+                        onClick={() => void cancelAppointment(a)}
                       >
-                        {confirmingId === a.id ? (
+                        {cancelingId === a.id ? (
                           <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Confirming…
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cancelling…
                           </>
                         ) : (
                           <>
-                            <Check className="w-3.5 h-3.5" /> Confirm appointment
+                            <X className="w-3.5 h-3.5" /> Cancel
                           </>
                         )}
                       </Button>
