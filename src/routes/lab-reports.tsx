@@ -60,12 +60,48 @@ function fmtFull(iso?: string) {
 type LabSeverity = "critical" | "abnormal";
 
 /**
- * Classify a lab's interpretation flags so the UI can add patient-appropriate
- * framing around a raw clinical flag (e.g. "HH" / "Critical high") instead of
- * showing it with no context. Based on common v2-0078 ObservationInterpretation
- * codes, with a text fallback for servers that only populate `.text`.
+ * Compare a numeric result against its own FHIR referenceRange. Returns
+ * null when the value is inside the range (or there's nothing numeric to
+ * compare), "abnormal" when it's outside, "critical" when it's far
+ * outside (>80% of the range's span beyond the boundary) — mirroring the
+ * H/HH, L/LL grading convention.
+ *
+ * This is authoritative over the upstream `interpretation` coding when
+ * both a numeric value and a numeric range are present on THIS
+ * observation, specifically so a stale/incorrect upstream interpretation
+ * flag can't make an in-range result (e.g. Hemoglobin 14.6 against
+ * 12.0–17.0, or WBC 7.5 against 4.5–11.0) show as ABNORMAL (H6).
  */
-function labSeverity(interpretation?: FhirObservation["interpretation"]): LabSeverity | null {
+function rangeSeverity(o: FhirObservation): LabSeverity | null {
+  const value = o.valueQuantity?.value;
+  const range = o.referenceRange?.[0];
+  if (value === undefined || !range) return null;
+  const lo = range.low?.value;
+  const hi = range.high?.value;
+  if (lo === undefined && hi === undefined) return null;
+  const span = (hi ?? lo ?? 0) - (lo ?? hi ?? 0) || Math.abs(hi ?? lo ?? 1) || 1;
+  if (lo !== undefined && value < lo) {
+    return value < lo - span * 0.8 ? "critical" : "abnormal";
+  }
+  if (hi !== undefined && value > hi) {
+    return value > hi + span * 0.8 ? "critical" : "abnormal";
+  }
+  return null;
+}
+
+/**
+ * Classify a lab's severity for the UI badge. Prefers the direct
+ * value-vs-reference-range comparison above; only falls back to the raw
+ * upstream `interpretation` flags/text when this observation has no
+ * numeric value+range to compare (e.g. qualitative results like "Negative").
+ * Interpretation codes follow common v2-0078 ObservationInterpretation
+ * conventions, with a text fallback for servers that only populate `.text`.
+ */
+function labSeverity(o: FhirObservation): LabSeverity | null {
+  if (o.valueQuantity?.value !== undefined && o.referenceRange?.[0]) {
+    return rangeSeverity(o);
+  }
+  const interpretation = o.interpretation;
   const codes = (interpretation ?? [])
     .flatMap((c) => c.coding ?? [])
     .map((c) => (c.code ?? "").toUpperCase());
@@ -76,6 +112,21 @@ function labSeverity(interpretation?: FhirObservation["interpretation"]): LabSev
   if (text.includes("critical")) return "critical";
   if (text.includes("abnormal") || /\b(high|low)\b/.test(text)) return "abnormal";
   return null;
+}
+
+/** Small severity pill shared by the table row and the mobile card layout. */
+function SeverityBadge({ sev }: { sev: LabSeverity }) {
+  return (
+    <span
+      className={
+        sev === "critical"
+          ? "inline-flex items-center rounded-full px-1.5 py-[1px] text-[8.5px] font-bold uppercase tracking-wider ring-1 ring-rose-400/40 bg-rose-400/10 text-rose-300"
+          : "inline-flex items-center rounded-full px-1.5 py-[1px] text-[8.5px] font-bold uppercase tracking-wider ring-1 ring-amber-400/40 bg-amber-400/10 text-amber-300"
+      }
+    >
+      {sev === "critical" ? "Critical" : "Abnormal"}
+    </span>
+  );
 }
 
 /** Render a FHIR referenceRange entry as a short display string. */
@@ -124,56 +175,83 @@ function LabReportsPage() {
         ) : sorted.length === 0 ? (
           <p className="text-sm text-muted-foreground">No lab reports on file yet.</p>
         ) : (
-          <div className="-mx-5">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent border-white/[0.06]">
-                  <TableHead className="pl-5">Test</TableHead>
-                  <TableHead className="text-right">Value</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead className="pr-5 text-right">Date/Time</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sorted.map((o) => {
-                  const sev = labSeverity(o.interpretation);
-                  return (
-                    <TableRow
-                      key={o.id}
-                      onClick={() => setSelected(o)}
-                      className="border-white/[0.04] cursor-pointer transition-colors hover:bg-white/[0.03]"
-                    >
-                      <TableCell className="pl-5 font-medium text-foreground">
-                        <span className="inline-flex items-center gap-1.5">
-                          {conceptText(o.code) || "—"}
-                          {sev && (
-                            <span
-                              className={
-                                sev === "critical"
-                                  ? "inline-flex items-center rounded-full px-1.5 py-[1px] text-[8.5px] font-bold uppercase tracking-wider ring-1 ring-rose-400/40 bg-rose-400/10 text-rose-300"
-                                  : "inline-flex items-center rounded-full px-1.5 py-[1px] text-[8.5px] font-bold uppercase tracking-wider ring-1 ring-amber-400/40 bg-amber-400/10 text-amber-300"
-                              }
-                            >
-                              {sev === "critical" ? "Critical" : "Abnormal"}
-                            </span>
-                          )}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
+          <>
+            {/* Narrow viewports (H17): the 4-column table (Test / Value /
+                Unit / Date-Time) needs ~495px to show every column without
+                truncating, which overflows a ~307px card body at 375px.
+                The table itself scrolls (overflow-auto in ui/table.tsx),
+                but with no visible scrollbar or edge cue there was nothing
+                telling people more content existed, so Unit/Date just read
+                as cut off ("Ur", "g/"). Below `sm` we swap to a stacked
+                card per result — nothing to scroll, nothing to clip. */}
+            <div className="sm:hidden space-y-2">
+              {sorted.map((o) => {
+                const sev = labSeverity(o);
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() => setSelected(o)}
+                    className="w-full text-left rounded-xl border border-white/[0.06] bg-white/[0.02] px-3.5 py-3 transition-colors hover:bg-white/[0.04]"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex-1 min-w-0 truncate font-medium text-foreground">
+                        {conceptText(o.code) || "—"}
+                      </span>
+                      {sev && <SeverityBadge sev={sev} />}
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                      <span className="tabular-nums">
                         {o.valueQuantity?.value ?? o.valueString ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {o.valueQuantity?.unit ?? "—"}
-                      </TableCell>
-                      <TableCell className="pr-5 text-right text-xs text-muted-foreground whitespace-nowrap">
-                        {fmt(o.effectiveDateTime ?? o.issued)}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+                        {o.valueQuantity?.unit ? ` ${o.valueQuantity.unit}` : ""}
+                      </span>
+                      <span className="shrink-0">{fmt(o.effectiveDateTime ?? o.issued)}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="hidden sm:block -mx-5">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent border-white/[0.06]">
+                    <TableHead className="pl-5">Test</TableHead>
+                    <TableHead className="text-right">Value</TableHead>
+                    <TableHead>Unit</TableHead>
+                    <TableHead className="pr-5 text-right">Date/Time</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sorted.map((o) => {
+                    const sev = labSeverity(o);
+                    return (
+                      <TableRow
+                        key={o.id}
+                        onClick={() => setSelected(o)}
+                        className="border-white/[0.04] cursor-pointer transition-colors hover:bg-white/[0.03]"
+                      >
+                        <TableCell className="pl-5 font-medium text-foreground">
+                          <span className="inline-flex items-center gap-1.5">
+                            {conceptText(o.code) || "—"}
+                            {sev && <SeverityBadge sev={sev} />}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {o.valueQuantity?.value ?? o.valueString ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {o.valueQuantity?.unit ?? "—"}
+                        </TableCell>
+                        <TableCell className="pr-5 text-right text-xs text-muted-foreground whitespace-nowrap">
+                          {fmt(o.effectiveDateTime ?? o.issued)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
       </CardShell>
 
@@ -185,7 +263,7 @@ function LabReportsPage() {
           </DialogHeader>
           {selected &&
             (() => {
-              const sev = labSeverity(selected.interpretation);
+              const sev = labSeverity(selected);
               const refRange = referenceRangeText(selected);
               return (
                 <>

@@ -62,7 +62,9 @@ function ConditionRow({ c }: { c: FhirCondition }) {
           >
             <Activity className="w-4 h-4" style={{ color }} />
           </div>
-          <span className="truncate text-sm font-medium">{title}</span>
+          {/* flex-1 min-w-0 required for `truncate` to clamp instead of
+              hard-clipping at narrow widths — see medications.tsx (H17). */}
+          <span className="flex-1 min-w-0 truncate text-sm font-medium">{title}</span>
           {status && (
             <span className="ml-auto mr-2 shrink-0">
               <StatusBadge label={status} color={color} />
@@ -109,7 +111,9 @@ function AllergyItem({ a }: { a: FhirAllergyIntolerance }) {
           >
             <AlertTriangle className="w-4 h-4" style={{ color: sectionColors.allergies }} />
           </div>
-          <span className="truncate text-sm font-medium">{substance}</span>
+          {/* flex-1 min-w-0 required for `truncate` to clamp instead of
+              hard-clipping at narrow widths — see medications.tsx (H17). */}
+          <span className="flex-1 min-w-0 truncate text-sm font-medium">{substance}</span>
           {a.criticality && (
             <span className="ml-auto mr-2 shrink-0">
               <StatusBadge label={a.criticality} color={color} />

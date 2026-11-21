@@ -58,7 +58,13 @@ function MedRow({ m }: { m: FhirMedicationRequest }) {
           >
             <Pill className="w-4 h-4" style={{ color }} />
           </div>
-          <span className="truncate text-sm font-medium">{title}</span>
+          {/* flex-1 min-w-0 is required for `truncate` to actually clamp —
+              without it this span's flex min-width defaults to `auto`
+              (its full content size), so at narrow widths it never
+              shrinks and both the title AND the shrink-0 status badge
+              next to it get hard-clipped by the viewport edge instead of
+              properly ellipsizing/fitting (H17). */}
+          <span className="flex-1 min-w-0 truncate text-sm font-medium">{title}</span>
           {m.status && (
             <span className="ml-auto mr-2 shrink-0">
               <StatusBadge label={m.status} color={color} />

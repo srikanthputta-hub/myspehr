@@ -493,20 +493,62 @@ export function dedupeMedications(list: FhirMedicationRequest[]): FhirMedication
   return out;
 }
 
+/**
+ * Bare numeric/string value for dedup purposes — deliberately omits the
+ * unit that `observationValue()` appends for display. Two Observation
+ * resources for the same real result (e.g. one synced without a unit)
+ * otherwise produce dedup keys of "14.6 g/dL" vs "14.6", which never
+ * collide, so both rows survived `dedupeObservations()` (H6).
+ */
+function dedupeValueKey(o: FhirObservation): string {
+  if (o.valueQuantity?.value !== undefined) return String(o.valueQuantity.value);
+  if (o.valueString) return o.valueString;
+  if (o.valueCodeableConcept) return conceptText(o.valueCodeableConcept);
+  if (o.component?.length) {
+    return o.component
+      .map((c) =>
+        c.valueQuantity?.value !== undefined
+          ? String(c.valueQuantity.value)
+          : (c.valueString ?? ""),
+      )
+      .filter(Boolean)
+      .join(" / ");
+  }
+  return "";
+}
+
+/** How much usable detail an Observation carries — used to pick a winner
+ * among duplicates instead of arbitrarily keeping whichever came first. */
+function observationRichness(o: FhirObservation): number {
+  let score = 0;
+  if (o.valueQuantity?.unit) score++;
+  if (o.referenceRange?.length) score++;
+  if (o.interpretation?.length) score++;
+  if (o.performer?.length) score++;
+  return score;
+}
+
 export function dedupeObservations(list: FhirObservation[]): FhirObservation[] {
-  const seen = new Set<string>();
-  const out: FhirObservation[] = [];
+  const bestByKey = new Map<string, FhirObservation>();
+  const order: string[] = [];
   for (const o of list) {
     const key = [
       conceptText(o.code).toLowerCase().trim(),
       o.effectiveDateTime ?? o.issued ?? "",
-      observationValue(o),
+      dedupeValueKey(o),
     ].join("|");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(o);
+    const existing = bestByKey.get(key);
+    if (!existing) {
+      bestByKey.set(key, o);
+      order.push(key);
+    } else if (observationRichness(o) > observationRichness(existing)) {
+      // Same test/time/value as one already kept (a true duplicate) —
+      // keep the more complete copy, e.g. the one that actually carries a
+      // unit, instead of whichever duplicate happened to come first.
+      bestByKey.set(key, o);
+    }
   }
-  return out;
+  return order.map((k) => bestByKey.get(k)!);
 }
 
 /* ---------- Vital-sign classification ---------- */
