@@ -7,6 +7,7 @@ import { patientStore } from "@/lib/patient-store";
 import { clearAllChatHistory } from "@/lib/chat-storage";
 import { useActiveMrn } from "@/features/_shared/use-active-mrn";
 import { useFhirPatient, fhirName, type FhirPatient } from "@/lib/fhir-live";
+import { maskMrn } from "@/lib/mrn";
 
 export const Route = createFileRoute("/profile")({
   head: () => ({ meta: [{ title: "Profile — My SPEHR Link" }] }),
@@ -59,7 +60,9 @@ function ProfilePage() {
         <CardShell icon={IdCard} color={sectionColors.records} title="Identity">
           <div className="space-y-3 text-sm">
             <Field label="Name" value={full} loading={q.isLoading} />
-            <Field label="MRN" value={mrn ?? ""} mono loading={!mrn} />
+            {/* Masked — a screenshot of the Profile page shouldn't leak the
+                full, trivially-enumerable MRN (see QA finding C5). */}
+            <Field label="MRN" value={maskMrn(mrn)} mono loading={!mrn} />
             <Field label="Date of birth" value={patient?.birthDate ?? ""} loading={q.isLoading} />
             <Field label="Gender" value={patient?.gender ?? ""} capitalize loading={q.isLoading} />
           </div>

@@ -157,7 +157,7 @@ export interface FhirAppointment {
   end?: string;
   comment?: string;
   participant?: Array<{
-    actor?: { reference?: string; display?: string };
+    actor?: { reference?: string; display?: string; type?: string };
     status?: string;
   }>;
   location?: Array<{ display?: string }>;

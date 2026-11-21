@@ -2,7 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { CalendarDays, Plus, Stethoscope, MapPin, Check, X, Loader2, FileText } from "lucide-react";
 import { DetailPageShell, sectionColors } from "@/components/spehr-ui";
-import { useAppointments, createAppointment, updateAppointment } from "@/features/appointments";
+import {
+  useAppointments,
+  createAppointment,
+  updateAppointmentByFhirId,
+} from "@/features/appointments";
 import { useDerivedFollowUp } from "@/features/appointments/derive-followup";
 import { useSpehrDirectory } from "@/features/appointments/use-spehr-directory";
 import { useDemographics } from "@/features/demographics";
@@ -122,14 +126,6 @@ function fmtTime(iso: string) {
  * appointment that's already finished or already cancelled. */
 const CLOSED_STATUSES = new Set(["fulfilled", "completed", "cancelled", "noshow"]);
 
-/** True only for a row that actually originated as a local myspehr booking
- * (has a real `created_at`, unlike a purely FHIR-derived row produced by
- * `fhirToRow`, which sets it to null) — only those can be mirrored back to
- * the local `appointments` table after a cancel. */
-function isLocalRow(a: { created_at: string | null }): boolean {
-  return !!a.created_at;
-}
-
 function AppointmentsPage() {
   const { mrn, appointments, loading, refresh } = useAppointments();
   const { followUp } = useDerivedFollowUp(mrn);
@@ -210,12 +206,34 @@ function AppointmentsPage() {
    * Never a local-only delete: that would desync from the FHIR record spehr
    * still has, and the merge in useAppointments() would just resurrect the
    * appointment from the live FHIR read on the next refresh anyway.
+   *
+   * QA finding C6: this used to show "Appointment cancelled" and flip the
+   * card locally as soon as the PUT returned 2xx, with no real confirmation
+   * that the cancellation stuck. Two concrete bugs made that worse:
+   *  1. The local-mirror write used `updateAppointment(a.id, ...)`, but on
+   *     the merged row from useAppointments(), `a.id` is the FHIR resource
+   *     id (every live-FHIR entry sets `id: a.id` in fhirToRow), not the
+   *     Supabase `appointments` primary key — so it silently updated zero
+   *     rows (guarded behind an `isLocalRow()` check that, because of how
+   *     the merge always lets the live-FHIR row's `created_at: null` win,
+   *     evaluated false for literally every appointment visible in the
+   *     live feed — i.e. always). The local mirror never actually recorded
+   *     the cancellation.
+   *  2. The toast fired off the PUT's HTTP status alone. Now we read the
+   *     resource back and require status to actually read "cancelled"
+   *     before calling it a success — if the write didn't really stick
+   *     upstream, this surfaces as an error instead of a false "cancelled".
    */
   const cancelAppointment = async (a: (typeof appointments)[number]) => {
     if (!a.fhir_id) {
       toast.error("Cannot cancel", { description: "Missing FHIR record id." });
       return;
     }
+    const confirmed = window.confirm(
+      "Cancel this appointment? This can't be undone from here — you'll need to request a new one if you change your mind.",
+    );
+    if (!confirmed) return;
+
     setCancelingId(a.id);
     try {
       const startIso = new Date(a.scheduled_for).toISOString();
@@ -251,16 +269,39 @@ function AppointmentsPage() {
         ],
         ...(facilityDisplay ? { location: [{ display: facilityDisplay }] } : {}),
       });
-      const res = await fhirProxy({
+      const res = await fhirProxy<{ status?: string }>({
         method: "PUT",
         path: `/Appointment/${a.fhir_id}`,
         body: resource,
       });
       if (!res.ok) throw new Error(`FHIR ${res.status}: ${res.raw.slice(0, 200)}`);
 
-      if (isLocalRow(a)) {
-        await updateAppointment(a.id, { status: "cancelled" });
+      // Verify, don't trust: a 2xx from the proxy only means the write was
+      // accepted, not that the terminal status actually persisted. Re-read
+      // the resource and require it to actually say "cancelled" before
+      // this counts as success.
+      const verify = await fhirProxy<{ status?: string }>({
+        method: "GET",
+        path: `/Appointment/${a.fhir_id}`,
+      });
+      const persistedStatus = (verify.data?.status ?? "").toLowerCase();
+      if (!verify.ok || persistedStatus !== "cancelled") {
+        throw new Error(
+          "The cancellation did not persist on the server. Please try again.",
+        );
       }
+
+      // Mirror into the local Supabase row by fhir_id — not a.id, which on
+      // this merged row is the FHIR id, not the Supabase primary key (see
+      // the comment above). Tolerant of there being no local row at all.
+      await updateAppointmentByFhirId(a.fhir_id, { status: "cancelled" }).catch((e) => {
+        // The FHIR write (source of truth) is already confirmed above; a
+        // failure to update our own read-model mirror shouldn't turn a
+        // real, verified cancellation into an error toast — just log it so
+        // it's visible, and let the next refresh/poll reconcile from FHIR.
+        console.error("[appointments] local mirror update after cancel failed", e);
+      });
+
       toast.success("Appointment cancelled");
       await refresh();
     } catch (e) {
