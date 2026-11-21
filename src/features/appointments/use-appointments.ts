@@ -17,11 +17,38 @@ export type AppointmentRowWithMeta = AppointmentRow & { isRecall?: boolean };
  * SPEHR-originated bookings (or fresh MySPEHR PUTs) show up regardless of
  * which side wrote them.
  */
+/**
+ * Pick the provider participant out of a FHIR Appointment, skipping the
+ * patient (and the location, if it's modeled as a participant rather than
+ * the top-level `location` field).
+ *
+ * QA finding H11: the old version here was
+ * `.find((p) => p.actor?.reference?.startsWith("Practitioner/") ||
+ * p.actor?.display)`. Both myspehr's own writes (appointments.tsx) and
+ * spehr's outbound push (`buildAppointment` in fhir-outbound-poll) put the
+ * practitioner in a participant with NO `reference` at all (just a
+ * `display`) — so the `||` fell through to "first participant with any
+ * display", which is the PATIENT (always listed first, and always has a
+ * display). That's why a confirmed appointment showed the patient's own
+ * name as "Provider:". Exclude the patient (and location) explicitly
+ * instead of trying to positively identify "the practitioner one".
+ */
+function findProviderParticipant(
+  participants: FhirAppointment["participant"],
+): { reference?: string; display?: string; type?: string } | null {
+  for (const p of participants ?? []) {
+    const ref = p.actor?.reference ?? "";
+    const type = p.actor?.type;
+    if (ref.startsWith("Patient/") || type === "Patient") continue;
+    if (ref.startsWith("Location/") || type === "Location") continue;
+    if (p.actor) return p.actor;
+  }
+  return null;
+}
+
 function fhirToRow(a: FhirAppointment): AppointmentRowWithMeta {
   const start = a.start ?? new Date().toISOString();
-  const providerParticipant = (a.participant ?? []).find(
-    (p) => p.actor?.reference?.startsWith("Practitioner/") || p.actor?.display,
-  );
+  const providerParticipant = findProviderParticipant(a.participant);
   return {
     id: a.id,
     patient_mrn: (a.participant ?? [])
@@ -33,10 +60,7 @@ function fhirToRow(a: FhirAppointment): AppointmentRowWithMeta {
     reason: a.description ?? conceptListText(a.serviceType) ?? null,
     description: a.description ?? null,
     appointment_type: conceptListText(a.serviceType) || null,
-    provider:
-      providerParticipant?.actor?.reference?.startsWith("Practitioner/")
-        ? providerParticipant.actor.display ?? null
-        : providerParticipant?.actor?.display ?? null,
+    provider: providerParticipant?.display ?? null,
     location: a.location?.[0]?.display ?? null,
     notes: a.comment ?? null,
     fhir_id: a.id,

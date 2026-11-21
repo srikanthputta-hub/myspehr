@@ -16,6 +16,7 @@ import { useActiveMrn } from "@/features/_shared/use-active-mrn";
 import { useFhirPatient, fhirName } from "@/lib/fhir-live";
 import { useFhirSync } from "@/lib/use-fhir-sync";
 import { patientStore } from "@/lib/patient-store";
+import { maskMrn } from "@/lib/mrn";
 import { Skeleton } from "@/components/ui/skeleton";
 import logoUrl from "@/assets/spehr-logo.png";
 
@@ -60,7 +61,10 @@ function DashboardPage() {
 
   const { first: firstName } = fhirName(patientQ.data ?? null);
   const nameReady = !patientQ.isLoading && !!firstName;
-  const mrnLabel = mrn ?? "MRN-—";
+  // Masked — the dashboard header is the first thing a screenshot/shoulder
+  // surf would catch, and the full MRN is otherwise trivially enumerable
+  // (see QA finding C5).
+  const mrnLabel = maskMrn(mrn);
 
   const onSignOut = () => {
     patientStore.set(null);

@@ -2,7 +2,7 @@ import { useEffect, type ComponentType, type ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { useResolvedPatient } from "@/lib/patient-session";
-import { patientMrn } from "@/lib/mrn";
+import { maskedPatientMrn } from "@/lib/mrn";
 
 /* ---------- Page shell with back button (used by all detail routes) ----- */
 
@@ -72,7 +72,7 @@ export function DetailPageShell({
             </div>
           </div>
           <p className="text-[11px] text-white/50 mt-4 font-mono">
-            {patientMrn(patient)}
+            {maskedPatientMrn(patient)}
           </p>
         </div>
       </header>

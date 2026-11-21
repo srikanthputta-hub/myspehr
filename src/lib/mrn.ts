@@ -29,3 +29,27 @@ export function patientMrn(patient: PatientLike | null | undefined): string {
   if (ident?.value) return ident.value;
   return formatMrn(patient.id);
 }
+
+/**
+ * Masked MRN for display on patient-facing screens (dashboard header,
+ * profile, the generic detail-page header). spehr's clinician UI still
+ * needs to show full MRNs to staff — this masking is myspehr-only, so a
+ * screenshot of the patient portal can't be used to enumerate/target other
+ * patients' real MRNs (see QA finding C5). Keeps the "MRN-" prefix and the
+ * last two digits so the patient can visually confirm it's their own chart;
+ * everything else is replaced with a bullet.
+ */
+export function maskMrn(value: string | null | undefined): string {
+  if (!value) return "MRN-—";
+  const match = /^MRN-(\d+)$/.exec(value);
+  if (!match) return "MRN-••••••";
+  const digits = match[1];
+  const visible = digits.slice(-2);
+  const hidden = "•".repeat(Math.max(digits.length - visible.length, 4));
+  return `MRN-${hidden}${visible}`;
+}
+
+/** Masked form of {@link patientMrn}, for display only. */
+export function maskedPatientMrn(patient: PatientLike | null | undefined): string {
+  return maskMrn(patientMrn(patient));
+}
