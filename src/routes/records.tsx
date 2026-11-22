@@ -72,12 +72,20 @@ function ConditionRow({ c }: { c: FhirCondition }) {
       </AccordionTrigger>
       <AccordionContent className="px-4 pb-4">
         <dl className="space-y-1.5 text-sm">
-          {conceptListText(c.category) && <Detail label="Category" value={conceptListText(c.category)} />}
-          {conceptListText(c.bodySite) && <Detail label="Body site" value={conceptListText(c.bodySite)} />}
-          {c.onsetDateTime && <Detail label="Onset" value={new Date(c.onsetDateTime).toLocaleDateString()} />}
+          {conceptListText(c.category) && (
+            <Detail label="Category" value={conceptListText(c.category)} />
+          )}
+          {conceptListText(c.bodySite) && (
+            <Detail label="Body site" value={conceptListText(c.bodySite)} />
+          )}
+          {c.onsetDateTime && (
+            <Detail label="Onset" value={new Date(c.onsetDateTime).toLocaleDateString()} />
+          )}
           {c.note?.[0]?.text && (
             <div className="pt-2">
-              <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Notes</p>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
+                Notes
+              </p>
               <p className="text-foreground">{c.note[0].text}</p>
             </div>
           )}
@@ -87,14 +95,55 @@ function ConditionRow({ c }: { c: FhirCondition }) {
   );
 }
 
+function allergySeverityRank(criticality?: string): number {
+  const s = (criticality ?? "").toLowerCase();
+  if (s === "high") return 3;
+  if (s === "moderate") return 2;
+  if (s === "low") return 1;
+  return 0;
+}
+
+/**
+ * Collapse AllergyIntolerance resources to one row per logical allergy.
+ *
+ * QA finding H19: the FHIR server can hold more than one AllergyIntolerance
+ * resource for the same substance (e.g. one per documented severity level —
+ * "Penicillin HIGH" and "Penicillin LOW" as two separate resources), and
+ * this page was rendering one row per resource, so a patient with 2 real
+ * allergies saw 4 rows ("Penicillin HIGH, Eggs HIGH, Eggs LOW, Penicillin
+ * LOW"). This groups by the substance's display text and keeps only the
+ * single most clinically significant record per substance (highest
+ * criticality), merging in reaction detail from a duplicate that the kept
+ * record didn't itself carry, so nothing is silently dropped — it's just no
+ * longer shown as a separate row for the same allergy.
+ */
+function dedupeAllergiesBySubstance(raw: FhirAllergyIntolerance[]): FhirAllergyIntolerance[] {
+  const bySubstance = new Map<string, FhirAllergyIntolerance>();
+  for (const a of raw) {
+    const key = (conceptText(a.code) || "allergy").trim().toLowerCase();
+    const existing = bySubstance.get(key);
+    if (!existing) {
+      bySubstance.set(key, a);
+      continue;
+    }
+    const keepExisting =
+      allergySeverityRank(existing.criticality) >= allergySeverityRank(a.criticality);
+    const winner = keepExisting ? existing : a;
+    const loser = keepExisting ? a : existing;
+    bySubstance.set(key, {
+      ...winner,
+      reaction: winner.reaction?.length ? winner.reaction : loser.reaction,
+    });
+  }
+  return Array.from(bySubstance.values());
+}
+
 function AllergyItem({ a }: { a: FhirAllergyIntolerance }) {
   const sev = (a.criticality ?? "").toLowerCase();
   const color = SEVERITY_COLOR[sev] ?? sectionColors.allergies;
   const substance = conceptText(a.code) || "Allergy";
   const reaction =
-    a.reaction?.[0]?.description ||
-    conceptListText(a.reaction?.[0]?.manifestation) ||
-    "";
+    a.reaction?.[0]?.description || conceptListText(a.reaction?.[0]?.manifestation) || "";
   return (
     <AccordionItem
       value={a.id}
@@ -105,7 +154,9 @@ function AllergyItem({ a }: { a: FhirAllergyIntolerance }) {
         <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
           <div
             className="w-8 h-8 rounded-lg shrink-0 grid place-items-center"
-            style={{ backgroundColor: `color-mix(in oklab, ${sectionColors.allergies} 12%, transparent)` }}
+            style={{
+              backgroundColor: `color-mix(in oklab, ${sectionColors.allergies} 12%, transparent)`,
+            }}
           >
             <AlertTriangle className="w-4 h-4" style={{ color: sectionColors.allergies }} />
           </div>
@@ -176,7 +227,7 @@ function RecordsPage() {
   const aq = useFhirAllergies(mrn);
 
   const conditions = cq.data ?? [];
-  const allergies = aq.data ?? [];
+  const allergies = dedupeAllergiesBySubstance(aq.data ?? []);
 
   const active = conditions.filter((c) => conditionStatus(c).toLowerCase() === "active");
   const resolved = conditions.filter((c) => conditionStatus(c).toLowerCase() !== "active");
@@ -211,14 +262,38 @@ function RecordsPage() {
         <p className="text-sm text-muted-foreground">No records on file yet.</p>
       ) : (
         <Accordion type="multiple" defaultValue={["active", "allergies"]} className="space-y-3">
-          <Group id="active" icon={Activity} color={sectionColors.records} title="Active Conditions" count={active.length}>
-            {active.map((c) => <ConditionRow key={c.id} c={c} />)}
+          <Group
+            id="active"
+            icon={Activity}
+            color={sectionColors.records}
+            title="Active Conditions"
+            count={active.length}
+          >
+            {active.map((c) => (
+              <ConditionRow key={c.id} c={c} />
+            ))}
           </Group>
-          <Group id="resolved" icon={Activity} color="oklch(0.65 0.04 240)" title="Resolved / Prior" count={resolved.length}>
-            {resolved.map((c) => <ConditionRow key={c.id} c={c} />)}
+          <Group
+            id="resolved"
+            icon={Activity}
+            color="oklch(0.65 0.04 240)"
+            title="Resolved / Prior"
+            count={resolved.length}
+          >
+            {resolved.map((c) => (
+              <ConditionRow key={c.id} c={c} />
+            ))}
           </Group>
-          <Group id="allergies" icon={AlertTriangle} color={sectionColors.allergies} title="Allergies" count={allergies.length}>
-            {allergies.map((a) => <AllergyItem key={a.id} a={a} />)}
+          <Group
+            id="allergies"
+            icon={AlertTriangle}
+            color={sectionColors.allergies}
+            title="Allergies"
+            count={allergies.length}
+          >
+            {allergies.map((a) => (
+              <AllergyItem key={a.id} a={a} />
+            ))}
           </Group>
         </Accordion>
       )}
