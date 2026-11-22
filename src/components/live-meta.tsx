@@ -21,6 +21,15 @@ export function LiveMeta({
     const t = window.setInterval(() => setNow(Date.now()), 15_000);
     return () => window.clearInterval(t);
   }, []);
+  // QA L23: this used to show "Live · updated just now" right above "As of
+  // 17:43", which either duplicates the same fact twice in two different
+  // vocabularies or — if `now` has ticked forward since the last fetch while
+  // `label` hasn't been recomputed yet — can briefly look contradictory.
+  // Pick ONE honest freshness statement: the stable, absolute clock time
+  // up top (it doesn't change every render tick), and the relative "Xs ago"
+  // phrasing only in the secondary explanatory line below, where it reads
+  // as a plain-language gloss on that timestamp rather than a second,
+  // competing claim.
   const label = updatedAt ? formatAgo(now - updatedAt) : "just now";
   const asOf = updatedAt
     ? new Date(updatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
@@ -30,7 +39,7 @@ export function LiveMeta({
       <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
         <span className="flex items-center gap-2">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400/90" />
-          Live · updated {label}
+          {asOf ? `Live · as of ${asOf}` : "Live"}
         </span>
         <button
           type="button"
@@ -42,11 +51,9 @@ export function LiveMeta({
           Refresh
         </button>
       </div>
-      {asOf && (
-        <p className="mt-1 text-[10.5px] normal-case tracking-normal text-muted-foreground/70">
-          As of {asOf} — new chart entries can take a minute or two to show up here.
-        </p>
-      )}
+      <p className="mt-1 text-[10.5px] normal-case tracking-normal text-muted-foreground/70">
+        Updated {label} — new chart entries can take a minute or two to show up here.
+      </p>
     </div>
   );
 }

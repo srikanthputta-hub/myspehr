@@ -29,7 +29,7 @@ import { DetailPageShell, CardShell, sectionColors } from "@/components/spehr-ui
 import { patientStore } from "@/lib/patient-store";
 import { clearAllChatHistory } from "@/lib/chat-storage";
 import { useActiveMrn } from "@/features/_shared/use-active-mrn";
-import { useFhirConditions, conceptText } from "@/lib/fhir-live";
+import { useFhirConditions, conceptText, type FhirCondition } from "@/lib/fhir-live";
 
 export const Route = createFileRoute("/more")({
   head: () => ({ meta: [{ title: "More — My SPEHR Link" }] }),
@@ -96,7 +96,6 @@ function MorePage() {
   const [appointmentReminders, setAppointmentReminders] = useState(true);
   const [medicationReminders, setMedicationReminders] = useState(false);
   // Privacy state
-  const [biometric, setBiometric] = useState(false);
   const [analytics, setAnalytics] = useState(true);
 
   const handleLogout = () => {
@@ -216,7 +215,16 @@ function MorePage() {
         description="Control how your data is used and protected."
         onSave={() => saveAndClose("Privacy settings updated")}
       >
-        <ToggleRow label="Biometric sign-in" checked={biometric} onChange={setBiometric} />
+        {/* QA L27: there's no password/biometric infrastructure behind sign-in
+            at all (login is MRN-only — see routes/login.tsx) so this toggle
+            did nothing real no matter how it was set. Disabled + labeled as
+            a placeholder rather than removed outright, so the roadmap intent
+            stays visible without implying it works today. */}
+        <ToggleRow label="Biometric sign-in" checked={false} onChange={() => {}} disabled />
+        <p className="text-[11px] text-muted-foreground -mt-1.5">
+          Placeholder — not available yet. Sign-in is MRN-only in this demo; there's no
+          biometric auth behind this toggle.
+        </p>
         <ToggleRow label="Share anonymous analytics" checked={analytics} onChange={setAnalytics} />
         <p className="text-xs text-muted-foreground pt-2">
           Connections to this app are encrypted in transit (HTTPS). This is a demo
@@ -243,12 +251,11 @@ function MorePage() {
           >
             📧 support@myspehr.live
           </a>
-          <a
-            href="tel:+18001234567"
-            className="block rounded-lg border border-white/[0.08] px-3 py-2.5 hover:bg-white/[0.04]"
-          >
-            📞 +1 (800) 123-4567
-          </a>
+          {/* QA L27: this used to be an obviously-fake "+1 (800) 123-4567" styled
+              and linked (tel:) exactly like a real support line — tapping it
+              would dial an unrelated real phone number. No real support line
+              exists for this demo, so it's removed rather than left looking
+              real; email above is the one working contact channel. */}
         </div>
       </SimpleDialog>
 
@@ -259,10 +266,28 @@ function MorePage() {
         title="About"
         description="My SPEHR Link"
       >
-        <div className="space-y-2 text-sm text-muted-foreground">
+        <div className="space-y-3 text-sm text-muted-foreground">
           <p><span className="text-foreground font-medium">Version:</span> 1.0.0</p>
           <p><span className="text-foreground font-medium">Build:</span> 2026.06.25</p>
           <p>© 2026 SPEHR Health. All rights reserved.</p>
+          {/* QA L27: Privacy & Security said "Read our privacy policy in
+              About" but there was no privacy policy content here at all. */}
+          <div className="pt-2 border-t border-white/[0.08]">
+            <p className="text-foreground font-medium mb-1">Privacy policy</p>
+            <p>
+              All patient data in this app is synthetic demo data — no real Protected
+              Health Information (PHI) is collected, stored, or processed here.
+            </p>
+            <p className="mt-1.5">
+              Demo records are mirrored from the shared S.P.E.H.R. FHIR server into this
+              app's own database on sign-in and are automatically purged after 48 hours.
+              Connections are encrypted in transit (HTTPS). Data is not sold or shared
+              with third parties. This demo does not yet enforce per-patient access
+              controls on stored records, so no real personal health information should
+              ever be entered.
+            </p>
+            <p className="mt-1.5">Questions: support@myspehr.live.</p>
+          </div>
         </div>
       </SimpleDialog>
 
@@ -323,27 +348,53 @@ function ToggleRow({
   label,
   checked,
   onChange,
+  disabled,
 }: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <Row label={label}>
-      <Switch checked={checked} onCheckedChange={onChange} />
+      <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} />
     </Row>
   );
 }
 
 /* ---------- Training & Education (personalised via live FHIR Conditions) ---------- */
 
+// QA L26: "Modules matched to your active conditions" was matching against
+// EVERY Condition on file for the patient — including resolved/historical
+// ones — with no clinicalStatus filter at all. A patient admitted for
+// pneumonia but with an old, long-resolved stroke in their history could
+// get "Stroke Recovery" recommended over anything about pneumonia, because
+// the resolved stroke Condition matched the regex just as readily as the
+// active one. Scope matching to Conditions whose clinicalStatus is actually
+// active (or a recurrence/relapse of an active problem) — never
+// resolved/inactive/remission ones.
+const ACTIVE_CLINICAL_STATUS_CODES = new Set(["active", "recurrence", "relapse"]);
+
+function isActiveCondition(c: FhirCondition): boolean {
+  const code = c.clinicalStatus?.coding?.find((x) => x.code)?.code?.toLowerCase();
+  if (code) return ACTIVE_CLINICAL_STATUS_CODES.has(code);
+  // No coded clinicalStatus — fall back to the display text, and only
+  // treat it as active when the text doesn't say otherwise. An entirely
+  // unknown status is kept (rather than silently dropped) so a condition
+  // with missing metadata doesn't just vanish from matching.
+  const text = conceptText(c.clinicalStatus).toLowerCase();
+  if (!text) return true;
+  return !/resolved|inactive|remission/.test(text);
+}
+
 function TrainingDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const mrn = useActiveMrn();
   // Only fetch when the dialog is opened.
   const cq = useFhirConditions(open ? mrn : null);
   const conditions = cq.data ?? [];
+  const activeConditions = conditions.filter(isActiveCondition);
 
-  const modules = personalizedModules(conditions.map((c) => conceptText(c.code)));
+  const modules = personalizedModules(activeConditions.map((c) => conceptText(c.code)));
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -351,7 +402,7 @@ function TrainingDialog({ open, onClose }: { open: boolean; onClose: () => void 
         <DialogHeader>
           <DialogTitle>Training & Education</DialogTitle>
           <DialogDescription>
-            {conditions.length > 0
+            {activeConditions.length > 0
               ? "Modules matched to your active conditions."
               : "General health & wellness modules."}
           </DialogDescription>

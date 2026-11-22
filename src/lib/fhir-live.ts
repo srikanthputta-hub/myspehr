@@ -454,18 +454,48 @@ export function useFhirObservationsAll(mrn: string | null) {
   });
 }
 
+// QA L24: raw UCUM unit codes ("Cel", "mm[Hg]") were being shown verbatim
+// instead of the human-readable symbols a patient expects.
+const UCUM_UNIT_DISPLAY: Record<string, string> = {
+  Cel: "°C",
+  "[degF]": "°F",
+  "mm[Hg]": "mmHg",
+};
+
+/** "37.4" + "Cel" → "37.4°C" (no space before a degree symbol); anything
+ * else → "value unit" with the UCUM code swapped for its display form. */
+function formatQuantity(value: number, unit: string | undefined): string {
+  if (!unit) return `${value}`;
+  if (unit === "Cel" || unit === "[degF]") {
+    return `${value}${UCUM_UNIT_DISPLAY[unit]}`;
+  }
+  return `${value} ${UCUM_UNIT_DISPLAY[unit] ?? unit}`;
+}
+
 /** Observation value → single display string ("120/80 mmHg", "98 %"). */
 export function observationValue(o: FhirObservation): string {
   if (o.valueQuantity?.value !== undefined) {
-    return `${o.valueQuantity.value}${o.valueQuantity.unit ? " " + o.valueQuantity.unit : ""}`;
+    return formatQuantity(o.valueQuantity.value, o.valueQuantity.unit);
   }
   if (o.valueString) return o.valueString;
   if (o.valueCodeableConcept) return conceptText(o.valueCodeableConcept);
   if (o.component?.length) {
+    const quantities = o.component
+      .map((c) => c.valueQuantity)
+      .filter((q): q is { value?: number; unit?: string } => q?.value !== undefined);
+    // Two same-unit components (the normal shape for a systolic/diastolic
+    // blood-pressure panel) render as "120/80 mmHg", not "120 mmHg / 80
+    // mmHg" — see combineBloodPressure below, which also funnels through
+    // this same path for the two-separate-Observations case (QA L24).
+    if (quantities.length === 2 && quantities[0].unit === quantities[1].unit) {
+      const unit = quantities[0].unit;
+      const display = unit ? ` ${UCUM_UNIT_DISPLAY[unit] ?? unit}` : "";
+      return `${quantities[0].value}/${quantities[1].value}${display}`;
+    }
     return o.component
       .map((c) => {
         if (c.valueQuantity?.value !== undefined) {
-          return `${c.valueQuantity.value}${c.valueQuantity.unit ? " " + c.valueQuantity.unit : ""}`;
+          return formatQuantity(c.valueQuantity.value, c.valueQuantity.unit);
         }
         return c.valueString ?? "";
       })
@@ -601,6 +631,36 @@ export function isVitalSign(o: FhirObservation): boolean {
   return vitalKind(o) !== null;
 }
 
+const BP_LOINC = { systolic: "8480-6", diastolic: "8462-4" } as const;
+
+function obsLoincCode(o: FhirObservation): string | null {
+  return o.code?.coding?.find((c) => c.code)?.code ?? null;
+}
+
+/** Combine a separately-recorded systolic + diastolic Observation into one
+ * synthetic Observation with both as `component`s, so `observationValue`
+ * renders "120/80 mmHg" for it exactly like a real FHIR BP panel. QA L24:
+ * spehr sometimes writes systolic (8480-6) and diastolic (8462-4) as two
+ * independent Observation resources instead of one 85354-9 panel with
+ * components — the old code mapped both codes to the same "bp" kind and
+ * kept only whichever sorted first, silently dropping the other half of
+ * the pair (rendering as a single bare number like "121 mm[Hg]"). */
+function combineBloodPressure(
+  systolic: FhirObservation | undefined,
+  diastolic: FhirObservation | undefined,
+): FhirObservation | null {
+  if (!systolic && !diastolic) return null;
+  const base = systolic ?? diastolic!;
+  const sysQ = systolic?.valueQuantity;
+  const diaQ = diastolic?.valueQuantity;
+  if (sysQ?.value === undefined || diaQ?.value === undefined) {
+    // Only one half was ever recorded — show it plainly instead of
+    // fabricating a pair.
+    return base;
+  }
+  return { ...base, valueQuantity: undefined, component: [{ valueQuantity: sysQ }, { valueQuantity: diaQ }] };
+}
+
 /** Return the latest single observation per canonical vital sign kind. */
 export function latestVitalsByKind(list: FhirObservation[]): Array<{ kind: VitalKind; label: string; obs: FhirObservation }> {
   const sorted = [...list].sort((a, b) => {
@@ -609,13 +669,65 @@ export function latestVitalsByKind(list: FhirObservation[]): Array<{ kind: Vital
     return tb - ta;
   });
   const seen = new Map<VitalKind, FhirObservation>();
+  let latestSystolic: FhirObservation | undefined;
+  let latestDiastolic: FhirObservation | undefined;
   for (const o of sorted) {
     const k = vitalKind(o);
-    if (!k || seen.has(k)) continue;
+    if (!k) continue;
+    if (k === "bp") {
+      const code = obsLoincCode(o);
+      if (code === BP_LOINC.systolic) {
+        if (!latestSystolic) latestSystolic = o;
+        continue;
+      }
+      if (code === BP_LOINC.diastolic) {
+        if (!latestDiastolic) latestDiastolic = o;
+        continue;
+      }
+      // A panel-style Observation (85354-9) that already carries both
+      // values via `component` — use it as-is.
+      if (!seen.has("bp")) seen.set("bp", o);
+      continue;
+    }
+    if (seen.has(k)) continue;
     seen.set(k, o);
+  }
+  if (!seen.has("bp")) {
+    const combined = combineBloodPressure(latestSystolic, latestDiastolic);
+    if (combined) seen.set("bp", combined);
   }
   const order: VitalKind[] = ["hr", "bp", "rr", "spo2", "temp"];
   return order
     .filter((k) => seen.has(k))
     .map((k) => ({ kind: k, label: VITAL_LABEL[k], obs: seen.get(k)! }));
+}
+
+/** Up to `limit` numeric readings for a vital kind, oldest → newest, for a
+ * lightweight trend sparkline (QA L24 asked to show a short history where
+ * simple — this reuses the vitals/observations already fetched for the
+ * page, no extra network round trip). For "bp" the trend line follows the
+ * systolic value, matching the larger number shown in "120/80 mmHg". */
+export function vitalHistoryPoints(
+  list: FhirObservation[],
+  kind: VitalKind,
+  limit = 12,
+): Array<{ t: number; v: number }> {
+  const points: Array<{ t: number; v: number }> = [];
+  for (const o of list) {
+    if (vitalKind(o) !== kind) continue;
+    const t = new Date(o.effectiveDateTime ?? o.issued ?? "").getTime();
+    if (Number.isNaN(t)) continue;
+    let v: number | undefined;
+    if (kind === "bp") {
+      if (obsLoincCode(o) === BP_LOINC.diastolic) continue;
+      v = o.valueQuantity?.value ?? o.component?.[0]?.valueQuantity?.value;
+    } else {
+      v = o.valueQuantity?.value;
+    }
+    if (v === undefined || Number.isNaN(v)) continue;
+    points.push({ t, v });
+  }
+  points.sort((a, b) => a.t - b.t);
+  const deduped = points.filter((p, i) => i === 0 || p.t !== points[i - 1].t);
+  return deduped.slice(-limit);
 }

@@ -127,10 +127,23 @@ function RootComponent() {
     })();
   }, []);
 
+  // QA L29: on anything wider than a phone (`sm:` and up) this used to be
+  // `h-screen overflow-hidden` on the outer wrapper + a fixed `sm:h-[85vh]`
+  // on the card — 85% of whatever the real window height happened to be.
+  // On a short desktop/tablet browser window (e.g. ~529px tall) that shrank
+  // the card below what its own content needed, and because the outer
+  // wrapper had no scrolling of its own, there was no way to reach what got
+  // clipped (the Login button, lower dashboard tiles) except an "internal"
+  // scrollbar inside the card that's easy to miss. Below `sm:` (real phones)
+  // this is unchanged — the fixed full-screen app-shell behavior there is
+  // correct and intentional. At `sm:` and up, the card now sizes between a
+  // sane floor and a generous ceiling instead of a fixed percentage, and the
+  // OUTER page scrolls normally (like any other web page) if a short window
+  // ever needs more room than that ceiling allows.
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="h-screen w-full flex items-center justify-center overflow-hidden bg-slate-950">
-        <div className="relative w-full max-w-md flex flex-col overflow-hidden bg-background shadow-2xl h-full sm:h-[85vh] sm:rounded-[2.5rem]">
+      <div className="h-screen w-full flex items-center justify-center overflow-hidden bg-slate-950 sm:h-auto sm:min-h-screen sm:overflow-y-auto sm:py-6">
+        <div className="relative w-full max-w-md sm:max-w-xl flex flex-col overflow-hidden bg-background shadow-2xl h-full sm:h-auto sm:min-h-[600px] sm:max-h-[90vh] sm:rounded-[2.5rem]">
           <div className="flex-1 overflow-y-auto">
             <Outlet />
           </div>

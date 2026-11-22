@@ -11,6 +11,7 @@ import {
   withMyspehrTag,
   myspehrPaymentId,
 } from "@/lib/fhir-proxy-client";
+import { formatCurrency } from "@/lib/utils";
 
 export const Route = createFileRoute("/billing")({
   head: () => ({ meta: [{ title: "Billing — My SPEHR Link" }] }),
@@ -168,7 +169,7 @@ function BillingPage() {
         <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
           Outstanding balance
         </p>
-        <p className="mt-1 text-3xl font-semibold">${outstanding.toFixed(2)}</p>
+        <p className="mt-1 text-3xl font-semibold">{formatCurrency(outstanding)}</p>
       </div>
 
       {invoicesQuery.isLoading ? (
@@ -214,7 +215,7 @@ function BillingPage() {
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">{fmtDate(inv.date)}</span>
                     <span className="font-medium">
-                      {currency} {value.toFixed(2)}
+                      {formatCurrency(value, currency)}
                     </span>
                   </div>
                   {canPay && (
@@ -241,7 +242,7 @@ function BillingPage() {
                           </>
                         ) : (
                           <>
-                            <Check className="w-4 h-4" /> Pay {currency} {value.toFixed(2)}
+                            <Check className="w-4 h-4" /> Pay {formatCurrency(value, currency)}
                           </>
                         )}
                       </Button>
