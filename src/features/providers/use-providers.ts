@@ -30,6 +30,21 @@ const NON_HUMAN_PATTERNS = [
   /support desk/i,
   /system/i,
   /^unknown$/i,
+  // QA L25: automation/process names that showed up in MedicationRequest
+  // .requester, Composition.author, etc. and passed the two-capitalized-
+  // tokens heuristic below (e.g. "Auto Doc", "Admission Intake" are both
+  // two properly-capitalized English words) — they're not clinicians and
+  // must never be presented in the patient-facing "Care team" list under a
+  // clinical role like "Prescriber" or "Discharging Physician".
+  /\bauto\b/i,
+  /\bbot\b/i,
+  /\bengine\b/i,
+  /\bintake\b/i,
+  /\badmission\b/i,
+  /\bautomation\b/i,
+  /\bcoding\s+engine\b/i,
+  /\bai\b/i,
+  /^s\.?p\.?e\.?h\.?r\b/i, // self-referential "S.P.E.H.R ..." process names
 ];
 
 function looksLikePerson(name: string | undefined | null): boolean {
@@ -67,6 +82,11 @@ export function useProviders(): { providers: ProviderItem[]; loading: boolean } 
     const seen = new Set<string>();
     const providers: ProviderItem[] = [];
     for (const m of careTeam) {
+      // Same non-human filter as the parsed path below (QA L25) — a
+      // discrete CareTeam resource can carry an automation participant
+      // too, and it shouldn't be shown to the patient as a clinician here
+      // either just because it came from a more "trusted" FHIR resource.
+      if (NON_HUMAN_PATTERNS.some((r) => r.test(m.name.trim()))) continue;
       const id = slug(m.name) || slug(m.member_key);
       if (!id || seen.has(id)) continue;
       seen.add(id);

@@ -23,11 +23,22 @@ export const resolveAppointmentProvidersFromDischarge = createServerFn({ method:
     const provider = getBestCompositionProvider(compositions);
     if (!provider) return { provider: null, updated: 0 };
 
+    // QA L21: this used to update EVERY appointment with no provider for this
+    // patient — including a freshly patient-booked appointment that has no
+    // provider simply because the directory picker never let the patient
+    // choose one (see use-spehr-directory.ts). That silently stamped an
+    // unrelated discharge-derived provider onto an appointment the patient
+    // never saw or picked a provider for. Scope this backfill to rows whose
+    // `reason` actually looks like the discharge follow-up suggestion this
+    // function exists to resolve (the "Request this appointment" flow in
+    // appointments.tsx always seeds `reason` as "Follow-up with <provider>"
+    // or "Primary care follow-up") — never a generic, unrelated booking.
     const { data: updatedRows, error } = await supabaseAdmin
       .from("appointments")
       .update({ provider })
       .eq("patient_mrn", mrn)
       .is("provider", null)
+      .ilike("reason", "%follow%up%")
       .select("id");
     if (error) throw new Error(`appointments provider update: ${error.message}`);
 

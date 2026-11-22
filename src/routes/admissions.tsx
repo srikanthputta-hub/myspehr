@@ -40,6 +40,46 @@ function encounterType(e: FhirEncounter): string {
   );
 }
 
+// QA L23: the page used to interpolate the raw FHIR Encounter.status code
+// (e.g. "finished") straight into the UI. These are the standard FHIR
+// encounter-status codes — map each to a label a patient would understand.
+const ENCOUNTER_STATUS_LABEL: Record<string, string> = {
+  planned: "Scheduled",
+  arrived: "Checked in",
+  triaged: "Triaged",
+  "in-progress": "In progress",
+  onleave: "On leave",
+  finished: "Discharged",
+  cancelled: "Cancelled",
+  "entered-in-error": "Entered in error",
+  unknown: "Status unknown",
+};
+
+function encounterStatusLabel(status?: string): string {
+  if (!status) return "";
+  const known = ENCOUNTER_STATUS_LABEL[status.toLowerCase()];
+  if (known) return known;
+  // Fall back to a readable version of whatever code shows up (e.g.
+  // "my-custom-status" → "My custom status") rather than hiding it.
+  const spaced = status.replace(/[-_]+/g, " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** "3d 4h" / "6h" style length-of-stay, or null when either end of the stay
+ * is missing/unparseable. Shown alongside the discharge date (QA L23: the
+ * page previously showed neither). */
+function lengthOfStay(startIso?: string, endIso?: string): string | null {
+  if (!startIso || !endIso) return null;
+  const start = new Date(startIso).getTime();
+  const end = new Date(endIso).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return null;
+  const totalHours = Math.round((end - start) / 3_600_000);
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  if (days === 0) return `${hours}h`;
+  return hours === 0 ? `${days}d` : `${days}d ${hours}h`;
+}
+
 function AdmissionsPage() {
   const mrn = useActiveMrn();
   const q = useFhirEncounters(mrn);
@@ -70,6 +110,8 @@ function AdmissionsPage() {
             const color = TYPE_COLOR[type.toLowerCase()] ?? sectionColors.admissions;
             const reason = conceptListText(e.reasonCode) || "Encounter";
             const facility = e.serviceProvider?.display || e.location?.[0]?.location?.display || "";
+            const statusLabel = encounterStatusLabel(e.status);
+            const los = lengthOfStay(e.period?.start, e.period?.end);
             return (
               <CardShell
                 key={e.id}
@@ -80,9 +122,20 @@ function AdmissionsPage() {
               >
                 {facility && <p className="text-sm">{facility}</p>}
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {fmt(e.period?.start)}
-                  {e.status ? ` · ${e.status}` : ""}
+                  Admitted {fmt(e.period?.start)}
+                  {statusLabel ? ` · ${statusLabel}` : ""}
                 </p>
+                {e.period?.end ? (
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Discharged {fmt(e.period.end)}
+                    {los ? ` · Length of stay ${los}` : ""}
+                  </p>
+                ) : (
+                  statusLabel &&
+                  !["Discharged", "Cancelled", "Entered in error"].includes(statusLabel) && (
+                    <p className="mt-0.5 text-xs text-muted-foreground">Not yet discharged</p>
+                  )
+                )}
               </CardShell>
             );
           })}

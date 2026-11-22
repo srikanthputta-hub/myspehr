@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useActiveMrn } from "@/features/_shared/use-active-mrn";
 import { fhirProxy } from "@/lib/fhir-proxy-client";
 import { useFhirPatient, fhirName, type FhirChargeItem, type FhirInvoiceFull, type FhirBundle, type FhirExtension } from "@/lib/fhir-live";
+import { formatCurrency } from "@/lib/utils";
 
 /**
  * NOTE on this file's ownership check:
@@ -235,7 +236,7 @@ function InvoiceDetailPage() {
                       </td>
                       <td className="py-2 px-2 text-right tabular-nums">{c.quantity?.value ?? 1}</td>
                       <td className="py-2 pl-2 text-right tabular-nums">
-                        {cur} {value.toFixed(2)}
+                        {formatCurrency(value, cur)}
                       </td>
                     </tr>
                   );
@@ -252,7 +253,7 @@ function InvoiceDetailPage() {
               <div className="flex justify-between">
                 <dt className="text-muted-foreground print:text-black/70">Total Net</dt>
                 <dd className="tabular-nums">
-                  {totalNet.currency ?? currency} {totalNet.value.toFixed(2)}
+                  {formatCurrency(totalNet.value, totalNet.currency ?? currency)}
                 </dd>
               </div>
             )}
@@ -260,7 +261,7 @@ function InvoiceDetailPage() {
               <div className="flex justify-between font-semibold text-base pt-1 border-t border-white/[0.06] print:border-black/20">
                 <dt>Total Gross</dt>
                 <dd className="tabular-nums">
-                  {totalGross.currency ?? currency} {totalGross.value.toFixed(2)}
+                  {formatCurrency(totalGross.value, totalGross.currency ?? currency)}
                 </dd>
               </div>
             )}

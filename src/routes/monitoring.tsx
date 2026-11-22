@@ -10,9 +10,11 @@ import {
   observationValue,
   isVitalSign,
   latestVitalsByKind,
+  vitalHistoryPoints,
   conceptText,
   dedupeObservations,
   type FhirObservation,
+  type VitalKind,
 } from "@/lib/fhir-live";
 
 export const Route = createFileRoute("/monitoring")({
@@ -32,6 +34,46 @@ function fmt(iso: string | undefined) {
 
 function obsTime(o: FhirObservation): number {
   return new Date(o.effectiveDateTime ?? o.issued ?? 0).getTime();
+}
+
+/** QA L24: the page only ever showed one snapshot per vital with no sense
+ * of trend. This is a small inline-SVG sparkline (no charting dependency)
+ * over the readings already fetched for the page — oldest to newest, last
+ * point highlighted. Renders nothing when there's fewer than 2 points. */
+function Sparkline({ points, color }: { points: Array<{ t: number; v: number }>; color: string }) {
+  if (points.length < 2) return null;
+  const w = 100;
+  const h = 28;
+  const pad = 3;
+  const values = points.map((p) => p.v);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const coords = points.map((p, i) => {
+    const x = pad + (i / (points.length - 1)) * (w - pad * 2);
+    const y = pad + (1 - (p.v - min) / span) * (h - pad * 2);
+    return [x, y] as const;
+  });
+  const [lastX, lastY] = coords[coords.length - 1];
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      className="h-7 w-20 shrink-0"
+      preserveAspectRatio="none"
+      role="img"
+      aria-label="Recent trend"
+    >
+      <polyline
+        points={coords.map(([x, y]) => `${x},${y}`).join(" ")}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx={lastX} cy={lastY} r={1.8} fill={color} />
+    </svg>
+  );
 }
 
 function MonitoringPage() {
@@ -74,19 +116,27 @@ function MonitoringPage() {
         <p className="text-sm text-destructive">Could not load vitals: {err.message}</p>
       ) : vitals.length > 0 ? (
         <div className="space-y-3">
-          {vitals.map(({ kind, label, obs }) => (
-            <CardShell
-              key={kind}
-              icon={Activity}
-              color={sectionColors.medications}
-              title={label}
-            >
-              <p className="text-lg font-semibold">{observationValue(obs)}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {fmt(obs.effectiveDateTime ?? obs.issued)}
-              </p>
-            </CardShell>
-          ))}
+          {vitals.map(({ kind, label, obs }) => {
+            const history = vitalHistoryPoints(vitalsSource, kind as VitalKind);
+            return (
+              <CardShell
+                key={kind}
+                icon={Activity}
+                color={sectionColors.medications}
+                title={label}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-lg font-semibold">{observationValue(obs)}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {fmt(obs.effectiveDateTime ?? obs.issued)}
+                    </p>
+                  </div>
+                  <Sparkline points={history} color={sectionColors.medications} />
+                </div>
+              </CardShell>
+            );
+          })}
         </div>
       ) : latest.length > 0 ? (
         <div className="space-y-3">

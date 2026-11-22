@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { CalendarDays, Plus, Stethoscope, MapPin, Check, X, Loader2, FileText } from "lucide-react";
+import { CalendarDays, Plus, Stethoscope, MapPin, X, Loader2, FileText, RefreshCw } from "lucide-react";
 import { DetailPageShell, sectionColors } from "@/components/spehr-ui";
 import { useAppointments, createAppointment, updateAppointment } from "@/features/appointments";
 import { useDerivedFollowUp } from "@/features/appointments/derive-followup";
@@ -135,70 +135,12 @@ function AppointmentsPage() {
   const { followUp } = useDerivedFollowUp(mrn);
   const { patient } = useDemographics();
   const directory = useSpehrDirectory();
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
 
   const patientFullName = useMemo(() => {
     const parts = [patient?.first_name, patient?.last_name].filter(Boolean) as string[];
     return parts.length ? parts.join(" ") : mrn ?? "";
   }, [patient, mrn]);
-
-  const confirmAppointment = async (a: (typeof appointments)[number]) => {
-    if (!a.fhir_id) {
-      toast.error("Cannot confirm", { description: "Missing FHIR record id." });
-      return;
-    }
-    setConfirmingId(a.id);
-    try {
-      const startIso = new Date(a.scheduled_for).toISOString();
-      const endIso = new Date(new Date(a.scheduled_for).getTime() + 30 * 60_000).toISOString();
-      const facilityDisplay = a.location?.trim() ?? "";
-      const resource = withMyspehrTag({
-        resourceType: "Appointment",
-        id: a.fhir_id,
-        status: "pending",
-        description: a.reason ?? a.description ?? "Patient-confirmed appointment",
-        serviceType: [{ text: a.appointment_type ?? a.reason ?? "Follow-up" }],
-        start: startIso,
-        end: endIso,
-        comment: a.notes ?? undefined,
-        participant: [
-          {
-            actor: { reference: `Patient/${mrn}`, type: "Patient", display: patientFullName || mrn || "" },
-            required: "required",
-            status: "accepted",
-          },
-          ...(a.provider
-            ? [{ actor: { type: "Practitioner", display: a.provider }, required: "required", status: "accepted" }]
-            : []),
-          ...(facilityDisplay
-            ? [
-                {
-                  actor: { type: "Location", display: facilityDisplay },
-                  required: "required",
-                  status: "accepted",
-                },
-              ]
-            : []),
-        ],
-        ...(facilityDisplay ? { location: [{ display: facilityDisplay }] } : {}),
-      });
-      const res = await fhirProxy({
-        method: "PUT",
-        path: `/Appointment/${a.fhir_id}`,
-        body: resource,
-      });
-      if (!res.ok) throw new Error(`FHIR ${res.status}: ${res.raw.slice(0, 200)}`);
-      toast.success("Confirmation sent", { description: "Awaiting clinic acceptance." });
-      await refresh();
-    } catch (e) {
-      toast.error("Could not confirm", {
-        description: e instanceof Error ? e.message : undefined,
-      });
-    } finally {
-      setConfirmingId(null);
-    }
-  };
 
   /**
    * Cancel a myspehr-booked appointment. Same gate as everywhere else that
@@ -282,8 +224,31 @@ function AppointmentsPage() {
     notes: "",
   });
 
+  // QA L21: the date field previously accepted any raw string with no format
+  // or minimum-date validation (e.g. a bare, incomplete "202610"), and the
+  // "Send request" button was just silently disabled with no indication of
+  // why. `scheduledDate`/`dateError` give the UI something concrete to show,
+  // and `minLocalDateTime` puts an HTML5 floor on the native picker itself.
+  const scheduledDate = form.scheduled_for ? new Date(form.scheduled_for) : null;
+  const dateIsValid = !!scheduledDate && !Number.isNaN(scheduledDate.getTime());
+  const dateIsPast = dateIsValid && scheduledDate!.getTime() < Date.now();
+  const dateError = !form.scheduled_for
+    ? null
+    : !dateIsValid
+      ? "Enter a complete date and time."
+      : dateIsPast
+        ? "Choose a date and time in the future."
+        : null;
+  const minLocalDateTime = useMemo(() => {
+    const now = new Date();
+    now.setSeconds(0, 0);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  }, []);
+  const canSend = !busy && !!form.scheduled_for && dateIsValid && !dateIsPast;
+
   const onCreate = async () => {
-    if (!mrn || !form.scheduled_for) return;
+    if (!mrn || !canSend) return;
     setBusy(true);
     try {
       const startIso = new Date(form.scheduled_for).toISOString();
@@ -488,32 +453,20 @@ function AppointmentsPage() {
                   {a.notes && (
                     <p className="text-[11px] text-muted-foreground pt-1">{a.notes}</p>
                   )}
+                  {/* QA L22: a "Confirm appointment" action used to show here for a
+                      status "proposed" appointment too, letting a patient appear to
+                      self-confirm their own request. In this app "proposed" always
+                      means the PATIENT requested it and the CLINIC still needs to
+                      accept it (see onCreate below) — the patient's only appropriate
+                      action while that's pending is to cancel/withdraw the request,
+                      never to "confirm" it themselves. */}
                   {!CLOSED_STATUSES.has(a.status?.toLowerCase() ?? "") && a.fhir_id && (
                     <div className="pt-2 flex items-center gap-2">
-                      {a.status?.toLowerCase() === "proposed" && (
-                        <Button
-                          size="sm"
-                          className="gap-1.5 border-0 text-white hover:brightness-110"
-                          style={{ backgroundColor: TEAL }}
-                          disabled={confirmingId === a.id || cancelingId === a.id}
-                          onClick={() => void confirmAppointment(a)}
-                        >
-                          {confirmingId === a.id ? (
-                            <>
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Confirming…
-                            </>
-                          ) : (
-                            <>
-                              <Check className="w-3.5 h-3.5" /> Confirm appointment
-                            </>
-                          )}
-                        </Button>
-                      )}
                       <Button
                         size="sm"
                         variant="ghost"
                         className="gap-1.5 text-rose-300 hover:text-rose-200 hover:bg-rose-400/10"
-                        disabled={confirmingId === a.id || cancelingId === a.id}
+                        disabled={cancelingId === a.id}
                         onClick={() => void cancelAppointment(a)}
                       >
                         {cancelingId === a.id ? (
@@ -568,9 +521,14 @@ function AppointmentsPage() {
               <Input
                 id="when"
                 type="datetime-local"
+                min={minLocalDateTime}
                 value={form.scheduled_for}
                 onChange={(e) => setForm({ ...form, scheduled_for: e.target.value })}
+                aria-invalid={!!dateError}
               />
+              {dateError && (
+                <p className="mt-1 text-[11px] text-rose-300">{dateError}</p>
+              )}
             </div>
             <div>
               <Label htmlFor="location" className="text-[11.5px]">Location (optional)</Label>
@@ -582,9 +540,11 @@ function AppointmentsPage() {
                 <SelectTrigger id="location">
                   <SelectValue
                     placeholder={
-                      directory.facilities.length === 0
-                        ? "Directory unavailable"
-                        : "Select a hospital"
+                      directory.loading
+                        ? "Loading directory…"
+                        : directory.facilities.length === 0
+                          ? "Directory unavailable"
+                          : "Select a hospital"
                     }
                   />
                 </SelectTrigger>
@@ -596,6 +556,19 @@ function AppointmentsPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {!directory.loading && directory.failed && (
+                <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  Couldn't reach the facility directory — you can still send this
+                  request and the clinic will assign a location.
+                  <button
+                    type="button"
+                    onClick={directory.retry}
+                    className="inline-flex items-center gap-1 text-foreground underline underline-offset-2 hover:text-primary"
+                  >
+                    <RefreshCw className="w-3 h-3" /> Retry
+                  </button>
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="provider" className="text-[11.5px]">Provider (optional)</Label>
@@ -621,6 +594,10 @@ function AppointmentsPage() {
                     ))}
                 </SelectContent>
               </Select>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Leave blank and the clinic will assign a provider when they
+                confirm the request — it won't be chosen for you silently.
+              </p>
             </div>
             <div>
               <Label htmlFor="notes" className="text-[11.5px]">Notes</Label>
@@ -631,18 +608,27 @@ function AppointmentsPage() {
               />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={onCreate}
-              disabled={busy || !form.scheduled_for}
-              className="text-white hover:brightness-110"
-              style={{ backgroundColor: TEAL }}
-            >
-              {busy ? "Sending…" : "Send request"}
-            </Button>
+          <DialogFooter className="flex-col items-stretch gap-1.5 sm:flex-row sm:items-center">
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={onCreate}
+                disabled={!canSend}
+                className="text-white hover:brightness-110"
+                style={{ backgroundColor: TEAL }}
+              >
+                {busy ? "Sending…" : "Send request"}
+              </Button>
+            </div>
+            {!canSend && !busy && (
+              <p className="text-right text-[11px] text-muted-foreground">
+                {!form.scheduled_for
+                  ? "Pick a preferred date & time to continue."
+                  : dateError}
+              </p>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
