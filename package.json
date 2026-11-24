@@ -3,7 +3,9 @@
   "private": true,
   "sideEffects": false,
   "type": "module",
+  "packageManager": "bun@1.4.4",
   "scripts": {
+    "preinstall": "node -e \"if(!/^bun\\//.test(process.env.npm_config_user_agent||'')){console.error('\\n\\u2717 This repo uses bun, not npm/yarn/pnpm (see CLAUDE.md).\\n  Installing with another package manager re-resolves dependency\\n  ranges independently of the committed bun.lock and WILL break the\\n  build (TanStack Start / vite peer-dependency conflicts).\\n\\n  Run: bun install\\n');process.exit(1)}\"",
     "dev": "vite dev",
     "build": "vite build",
     "build:dev": "vite build --mode development",
