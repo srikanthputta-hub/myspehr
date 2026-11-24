@@ -18,20 +18,15 @@ export const Route = createFileRoute("/login")({
   component: LoginPage,
 });
 
-// Generic on purpose (QA finding C5): the same message covers "no such
-// MRN" and "DOB doesn't match" so the client can never tell which one
-// failed. Revealing that would just be a different enumeration vector —
-// MRNs are plain 6-digit numbers shown throughout the clinician-facing
-// spehr app, so they're trivially guessable/scrapable.
-const INVALID_CREDENTIALS_MESSAGE =
-  "Invalid credentials. Check your MRN and date of birth and try again.";
+// MRN-only login, by explicit product decision: MRN alone is enough to
+// sign in, so a failure can only mean one thing.
+const MRN_NOT_FOUND_MESSAGE = "MRN not found. Please check and try again.";
 
 function LoginPage() {
   const navigate = useNavigate();
   const sync = useFhirSync();
   const verifyLogin = useServerFn(verifyPatientLogin);
   const [mrn, setMrn] = useState("");
-  const [dob, setDob] = useState("");
   const [loading, setLoading] = useState(false);
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -41,22 +36,16 @@ function LoginPage() {
       toast.error("Please enter your MRN");
       return;
     }
-    if (!dob) {
-      toast.error("Please enter your date of birth");
-      return;
-    }
     const normalized = `MRN-${digits}`;
     setLoading(true);
 
     try {
-      // Real second factor: MRN alone used to be enough to open a full
-      // chart, and even a nonexistent MRN "signed in" to an empty shell.
-      // Both the MRN and DOB must now match a real patient record before
-      // anything unlocks — verified server-side so the FHIR bearer token
-      // and the unauthenticated chart data never touch the browser first.
-      const result = await verifyLogin({ data: { mrnDigits: digits, dob } });
+      // The MRN must still resolve to a real patient record — verified
+      // server-side so the FHIR bearer token and the unauthenticated chart
+      // data never touch the browser first.
+      const result = await verifyLogin({ data: { mrnDigits: digits } });
       if (!result.ok) {
-        toast.error(INVALID_CREDENTIALS_MESSAGE);
+        toast.error(MRN_NOT_FOUND_MESSAGE);
         setLoading(false);
         return;
       }
@@ -76,10 +65,9 @@ function LoginPage() {
         });
       }, 0);
     } catch {
-      // Network/server-fn error — same generic message, never a stack
-      // trace or "backend not configured" detail to an unauthenticated
-      // caller.
-      toast.error(INVALID_CREDENTIALS_MESSAGE);
+      // Network/server-fn error — same message, never a stack trace or
+      // "backend not configured" detail to an unauthenticated caller.
+      toast.error(MRN_NOT_FOUND_MESSAGE);
     } finally {
       setLoading(false);
     }
@@ -123,24 +111,6 @@ function LoginPage() {
                 placeholder="MRN- "
                 autoComplete="off"
                 className="w-full h-12 px-4 rounded-xl bg-white/[0.04] border border-white/[0.08] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-transparent transition font-mono tracking-wider"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="dob"
-                className="block text-[11px] font-medium text-muted-foreground/70 mb-1.5 pl-0.5"
-              >
-                Date of birth
-              </label>
-              <input
-                id="dob"
-                type="date"
-                required
-                value={dob}
-                onChange={(e) => setDob(e.target.value)}
-                autoComplete="off"
-                className="w-full h-12 px-4 rounded-xl bg-white/[0.04] border border-white/[0.08] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-transparent transition"
               />
             </div>
 
